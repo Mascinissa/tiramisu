@@ -79,7 +79,7 @@ int main(int argc, char **argv)
             );
     }*/
 
-    perform_autoscheduling= true;
+    perform_autoscheduling= false;
     
     // Generate a program with no schedule
     if (!perform_autoscheduling)
@@ -91,19 +91,24 @@ int main(int argc, char **argv)
 //
 //        B_out.parallelize(xx);
 
-        B_out.then(A_out, 4);
-        A_out.shift(1,1);
+//        A_out.shift(1,1);
 //        A_out.interchange(0,1);
 //        B_out.interchange(0,1);
 //        A_out.tile(1,2,20,10);
 //        A_out.tile(1,2,20,10);
 //        A_out.tile(1,2,32,10);
-        A_out.skew(0,1,4,1);
-        B_out.skew(0,1,4,1);
+        A_out.skew(1,2,2,-1);
+        B_out.skew(1,2,2,-1);
+//        A_out.loop_reversal(2);
+//        B_out.loop_reversal(2);
 //        A_out.tag_parallel_level(1);
 //        B_out.tag_parallel_level(1);
-        A_out.tile(0,1,64,32);
-        B_out.tile(0,1,64,32);
+//        A_out.tag_parallel_level(2);
+//        B_out.tag_parallel_level(2);
+//        B_out.tile(1,2,128,32);
+//        A_out.tile(1,2,128,32);
+//        B_out.then(A_out, 4);
+
 
 
 
