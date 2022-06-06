@@ -11,7 +11,7 @@ using namespace tiramisu;
 const std::string py_cmd_path = "/usr/bin/python3";
 
 // Path to a script that executes the ML model (please give absolute path)
-const std::string py_interface_path = "/home/nassim/Desktop/tiramisu_raw/tutorials/tutorial_autoscheduler/model/main.py";
+const std::string py_interface_path = "/Users/mm12191/tiramisu/tutorials/tutorial_autoscheduler/model/main.py";
 
 int main(int argc, char **argv)
 {
@@ -79,7 +79,7 @@ int main(int argc, char **argv)
             );
     }*/
 
-    perform_autoscheduling= false;
+    perform_autoscheduling= true;
     
     // Generate a program with no schedule
     if (!perform_autoscheduling)
@@ -120,7 +120,7 @@ int main(int argc, char **argv)
     }
 
     // Some parameters for the search methods
-    const int beam_size = 5;
+    const int beam_size = 2;
     const int max_depth = 6;
 
     const int nb_samples = 5;
@@ -141,10 +141,11 @@ int main(int argc, char **argv)
 //    auto_scheduler::mcts *mcts = new auto_scheduler::mcts(nb_samples, topk, max_depth, model_eval, exec_eval, scheds_gen);
     
     // Create the autoscheduler and start search
-    auto_scheduler::auto_scheduler as(bs, exec_eval);
+    auto_scheduler::auto_scheduler as(bs, model_eval);
+//    auto_scheduler::auto_scheduler as(bs, exec_eval);
     as.set_exec_evaluator(exec_eval);
-//    as.find_schedule();
-    as.sample_search_space("test.json");
+    as.find_schedule();
+//    as.sample_search_space("test.json");
 //    as.apply_best_schedule();
 
     delete scheds_gen;

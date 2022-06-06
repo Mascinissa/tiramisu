@@ -23,7 +23,7 @@ void beam_search::search(syntax_tree& ast)
         assert(generator_state::initialized == true);
     }
 
-    std::cout<<"TESTED";
+//    std::cout<<"TESTED";
     
     while ((!ast.is_search_space_empty()))
     {
@@ -66,11 +66,11 @@ void beam_search::search(syntax_tree& ast)
         if ((*iterator)->ast_is_legal() == false) {
 
             // print deleted Ast 
-            (*iterator)->print_previous_optims();
+//            (*iterator)->print_previous_optims();
             std::cout << "\n-----------" << std::endl;
-            (*iterator)->print_new_optims();
-            (*iterator)->print_ast();
-            (*iterator)->print_isl_states();
+//            (*iterator)->print_new_optims();
+//            (*iterator)->print_ast();
+//            (*iterator)->print_isl_states();
             std::cout << "\n<illegal>\n";
             delete (*iterator);
             iterator = children.erase(iterator);
@@ -78,10 +78,10 @@ void beam_search::search(syntax_tree& ast)
         else {
 
             // evaluate and print Ast
-            (*iterator)->print_previous_optims();
+//            (*iterator)->print_previous_optims();
             std::cout << "\n-----------" << std::endl;
-            (*iterator)->print_new_optims();
-            (*iterator)->print_ast();
+//            (*iterator)->print_new_optims();
+//            (*iterator)->print_ast();
 //            (*iterator)->print_isl_states();
 //            (*iterator)->print_computations_accesses();
             std::cout << "\n<legal>\n";
