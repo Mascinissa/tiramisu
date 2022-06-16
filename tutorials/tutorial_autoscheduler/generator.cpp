@@ -16,14 +16,14 @@ const std::string py_interface_path = "/Users/mm12191/tiramisu/tutorials/tutoria
 int main(int argc, char **argv)
 {
     tiramisu::init("conv");
-    
+
     var t("t", 0, 70), y("y", 0, 1024), x("x", 0, 1024),z("z", 0, 128);;
 
     //var  yy("yy", 1, 223), xx("xx", 1, 223);
     var  yy("yy", 1, 33), xx("xx", 1, 65), zz("zz", 1, 128);
 
     var t2("t2"),t1("t1"),y1("y1"),x1("x1"),y2("y2"),x2("x2") ,x0("x0");
-    
+
     // Declare computations
 
     input A("A", {x,y}, p_int32);
@@ -35,21 +35,21 @@ int main(int argc, char **argv)
 
     computation A_out("A_out", {t,xx,yy}, B(xx, yy) + B(xx, yy-1) + B(xx, 1+yy) + B(1+xx, yy) + B(xx-1, yy));
 
-    
 
-    buffer b_A("buffA", {1024,1024}, p_int32, a_output);    
-    buffer b_B("buffB", {1024,1024}, p_int32, a_output); 
+
+    buffer b_A("buffA", {1024,1024}, p_int32, a_output);
+    buffer b_B("buffB", {1024,1024}, p_int32, a_output);
     A.store_in(&b_A);
     B.store_in(&b_B);
 
     //Store computations
     A_out.store_in(&b_A, {xx,yy});
-    B_out.store_in(&b_B, {xx,yy});  
+    B_out.store_in(&b_B, {xx,yy});
 
 
     B_out.then(A_out, t);
 //    B_out.interchange(1,2);
-    // the code above is the initial unfused code since we used "B_out.then(A_out, t)" 
+    // the code above is the initial unfused code since we used "B_out.then(A_out, t)"
     // we want to dependency analysis to be performed on the original code correctly
 
     prepare_schedules_for_legality_checks(true);
@@ -80,7 +80,7 @@ int main(int argc, char **argv)
     }*/
 
     perform_autoscheduling= true;
-    
+
     // Generate a program with no schedule
     if (!perform_autoscheduling)
     {
@@ -115,7 +115,7 @@ int main(int argc, char **argv)
         tiramisu::codegen({
             &b_A,&b_B
         }, "function.o");
-       
+
         return 0;
     }
 
@@ -125,21 +125,21 @@ int main(int argc, char **argv)
 
     const int nb_samples = 5;
     const int topk = 1;
-    
+
     // An object used by search methods to generate schedules
     auto_scheduler::schedules_generator *scheds_gen = new auto_scheduler::ml_model_schedules_generator();
-    
+
     // An evaluation function that measures execution time by compiling and executing the program
-    auto_scheduler::evaluate_by_execution *exec_eval = new auto_scheduler::evaluate_by_execution({&b_A,&b_B}, 
+    auto_scheduler::evaluate_by_execution *exec_eval = new auto_scheduler::evaluate_by_execution({&b_A,&b_B},
                                       "function.o", "./wrapper");
-    
+
     // An evaluation function that uses an ML model to estimate speedup
     auto_scheduler::evaluation_function *model_eval = new auto_scheduler::evaluate_by_learning_model(py_cmd_path, {py_interface_path});
-    
+
     // Two search methods : Beam Search and MCTS
     auto_scheduler::search_method *bs = new auto_scheduler::beam_search(beam_size, max_depth, model_eval, scheds_gen);
 //    auto_scheduler::mcts *mcts = new auto_scheduler::mcts(nb_samples, topk, max_depth, model_eval, exec_eval, scheds_gen);
-    
+
     // Create the autoscheduler and start search
     auto_scheduler::auto_scheduler as(bs, model_eval);
 //    auto_scheduler::auto_scheduler as(bs, exec_eval);
@@ -152,6 +152,6 @@ int main(int argc, char **argv)
     delete exec_eval;
     delete bs;
 //    delete mcts;
-    
+
     return 0;
 }
