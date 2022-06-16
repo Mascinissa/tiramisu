@@ -33,21 +33,21 @@ int main(int argc, char **argv)
 
     computation B_out("B_out", {t,xx,yy}, A(xx, yy) + A(xx, yy-1) + A(xx, 1+yy) + A(1+xx, yy) + A(xx-1, yy));
 
-    computation A_out("A_out", {t,xx,yy}, B(xx, yy) + B(xx, yy-1) + B(xx, 1+yy) + B(1+xx, yy) + B(xx-1, yy));
+//    computation A_out("A_out", {t,xx,yy}, B(xx, yy) + B(xx, yy-1) + B(xx, 1+yy) + B(1+xx, yy) + B(xx-1, yy));
 
 
 
-    buffer b_A("buffA", {1024,1024}, p_int32, a_output);
+    buffer b_A("buffA", {1024,1024}, p_int32, a_input);
     buffer b_B("buffB", {1024,1024}, p_int32, a_output);
     A.store_in(&b_A);
     B.store_in(&b_B);
 
     //Store computations
-    A_out.store_in(&b_A, {xx,yy});
+//    A_out.store_in(&b_A, {xx,yy});
     B_out.store_in(&b_B, {xx,yy});
 
 
-    B_out.then(A_out, t);
+//    B_out.then(A_out, t);
 //    B_out.interchange(1,2);
     // the code above is the initial unfused code since we used "B_out.then(A_out, t)"
     // we want to dependency analysis to be performed on the original code correctly
@@ -97,7 +97,7 @@ int main(int argc, char **argv)
 //        A_out.tile(1,2,20,10);
 //        A_out.tile(1,2,20,10);
 //        A_out.tile(1,2,32,10);
-        A_out.skew(1,2,2,-1);
+//        A_out.skew(1,2,2,-1);
         B_out.skew(1,2,2,-1);
 //        A_out.loop_reversal(2);
 //        B_out.loop_reversal(2);
@@ -141,11 +141,11 @@ int main(int argc, char **argv)
 //    auto_scheduler::mcts *mcts = new auto_scheduler::mcts(nb_samples, topk, max_depth, model_eval, exec_eval, scheds_gen);
 
     // Create the autoscheduler and start search
-    auto_scheduler::auto_scheduler as(bs, model_eval);
-//    auto_scheduler::auto_scheduler as(bs, exec_eval);
+//    auto_scheduler::auto_scheduler as(bs, model_eval);
+    auto_scheduler::auto_scheduler as(bs, exec_eval);
     as.set_exec_evaluator(exec_eval);
-    as.find_schedule();
-//    as.sample_search_space("test.json");
+//    as.find_schedule();
+    as.sample_search_space("test.json");
 //    as.apply_best_schedule();
 
     delete scheds_gen;

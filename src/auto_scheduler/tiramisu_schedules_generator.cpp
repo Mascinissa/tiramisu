@@ -1109,6 +1109,8 @@ std::vector<syntax_tree *> ml_model_schedules_generator::generate_schedules(synt
 
         for (ast_node *commun_node : shared_nodes)
         {
+            if (commun_node->depth>0)
+                continue;
             std::vector<std::string> loop_names = involved_computations[0]->get_loop_level_names();
 
             std::string loop_name = loop_names[commun_node->depth];
