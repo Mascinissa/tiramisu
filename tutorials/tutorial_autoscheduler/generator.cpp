@@ -20,7 +20,7 @@ int main(int argc, char **argv)
     var t("t", 0, 70), y("y", 0, 1024), x("x", 0, 1024),z("z", 0, 128);;
 
     //var  yy("yy", 1, 223), xx("xx", 1, 223);
-    var  yy("yy", 1, 33), xx("xx", 1, 65), zz("zz", 1, 128);
+    var  yy("yy", 1, 33), xx("xx", 1, 16), zz("zz", 1, 128);
 
     var t2("t2"),t1("t1"),y1("y1"),x1("x1"),y2("y2"),x2("x2") ,x0("x0");
 
@@ -141,12 +141,12 @@ int main(int argc, char **argv)
 //    auto_scheduler::mcts *mcts = new auto_scheduler::mcts(nb_samples, topk, max_depth, model_eval, exec_eval, scheds_gen);
 
     // Create the autoscheduler and start search
-//    auto_scheduler::auto_scheduler as(bs, model_eval);
-    auto_scheduler::auto_scheduler as(bs, exec_eval);
+    auto_scheduler::auto_scheduler as(bs, model_eval);
+//    auto_scheduler::auto_scheduler as(bs, exec_eval);
     as.set_exec_evaluator(exec_eval);
-//    as.find_schedule();
-    as.sample_search_space("test.json");
-//    as.apply_best_schedule();
+    as.find_schedule();
+//    as.sample_search_space("test.json");
+    as.apply_best_schedule();
 
     delete scheds_gen;
     delete exec_eval;

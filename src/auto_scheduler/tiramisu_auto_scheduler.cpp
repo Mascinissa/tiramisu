@@ -109,7 +109,7 @@ void auto_scheduler::find_schedule()
     //fct->reset_schedules();
     fct->reset_all_static_dims_to_zero();
     if (exec_evaluator != nullptr)
-        initial_exec_time = exec_evaluator->evaluate(ast);
+        initial_exec_time = min_eval(exec_evaluator->get_measurements(ast));
     
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     
@@ -122,6 +122,8 @@ void auto_scheduler::find_schedule()
     // Print some info about the search
     std::cout << "NB explored schedules : " << searcher->get_nb_explored_schedules() << std::endl;
     std::cout << "Best evaluation : " << searcher->get_best_evaluation() << std::endl;
+    syntax_tree *best_ast = searcher->get_best_ast();
+    std::cout<<"Best schedule : " <<best_ast->get_schedule_str()<<std::endl;
     
     if (exec_evaluator != nullptr)
         std::cout << "Initial exec time : " << initial_exec_time << std::endl;
@@ -133,14 +135,17 @@ void auto_scheduler::find_schedule()
 void auto_scheduler::apply_best_schedule()
 {
     syntax_tree *best_ast = searcher->get_best_ast();
+    std::cout<<best_ast->get_schedule_str()<<std::endl;
+
     best_ast->print_ast();
-    
+
     // To apply the best schedule, we need to use exec_evaluator.
     // Note : this should be improved, meaning no need to use exec_evaluator
     // to apply the best schedule.
     if (exec_evaluator != nullptr)
     {
-        float best_sched_exec_time = exec_evaluator->evaluate(*best_ast);
+        std::vector<float> measurements = exec_evaluator->get_measurements(*best_ast);
+        float best_sched_exec_time = min_eval(measurements);
         std::cout << "Best schedule exec time : " << best_sched_exec_time << std::endl;
         std::cout << "Speedup : " << initial_exec_time / best_sched_exec_time << std::endl;
     }

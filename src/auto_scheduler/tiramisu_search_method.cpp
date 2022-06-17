@@ -84,6 +84,7 @@ void beam_search::search(syntax_tree& ast)
 //            (*iterator)->print_ast();
 //            (*iterator)->print_isl_states();
 //            (*iterator)->print_computations_accesses();
+            std::cout<<(*iterator)->get_schedule_str()<<std::endl;
             std::cout << "\n<legal>\n";
 
             (*iterator)->evaluation = eval_func->evaluate(*(*iterator));
