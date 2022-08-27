@@ -1342,6 +1342,13 @@ public:
       std::vector<std::pair<int,int>>> skewing_local_solver(std::vector<tiramisu::computation *> fuzed_computations,
                                                             tiramisu::var outer_variable,tiramisu::var inner_variable, int nb_parallel);
 
+    std::tuple<
+      std::vector<std::pair<int,int>>,
+      std::vector<std::pair<int,int>>,
+      std::vector<std::pair<int,int>>> skewing_local_solver(std::vector<tiramisu::computation *> fuzed_computations,
+                                                            int outer_level,int inner_level, int nb_parallel);
+    // @}
+
     /**
      * for each computation, it computes potentiel canidate for vectorization, then it regroups it in result vector. 
     */
