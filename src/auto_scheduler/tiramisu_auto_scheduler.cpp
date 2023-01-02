@@ -18,20 +18,21 @@ auto_scheduler::auto_scheduler(search_method *searcher, evaluation_function *eva
 void auto_scheduler::sample_search_space(std::string filename, bool timeout_schedules)
 {
     std::chrono::steady_clock::time_point sampling_start = std::chrono::steady_clock::now();
-    fct->reset_schedules();
+    fct->reset_all_static_dims_to_zero();
 
     setenv("INIT_EXEC_TIME", "0", true); // set the INIT_EXEC_TIME to 0 meaning that it's the non scheduled version
     float initial_timeout = std::atof(read_env_var("INITIAL_TIMEOUT"));
 
-    std::vector<float> initial_measurements = exec_evaluator->get_measurements(ast, true, initial_timeout);
-    initial_exec_time = min_eval(initial_measurements);
+    std::vector<float> initial_measurements;
+
+    initial_exec_time = -1;
     if (std::isinf(initial_exec_time)){
         std::cerr << "error: Evaluation of the non scheduled version of the program failed "<< std::endl;
         exit(1);
     }
     ast.evaluation = initial_exec_time;
-    if (std::atoi(read_env_var("AS_VERBOSE"))==1)
-        std::cout << "Initial exec time : " << initial_exec_time << std::endl;
+//    if (std::atoi(read_env_var("AS_VERBOSE"))==1)
+    std::cout << "Initial exec time : " << initial_exec_time << std::endl;
     std::string program_json = evaluate_by_learning_model::get_program_json(ast);
     std::vector<std::string> schedules_annotations;
 
@@ -39,7 +40,7 @@ void auto_scheduler::sample_search_space(std::string filename, bool timeout_sche
     std::string empty_schedule_json = evaluate_by_learning_model::get_schedule_json(ast);
     empty_schedule_json.pop_back(); // remove the last two characters }\n
     empty_schedule_json.pop_back();
-    empty_schedule_json += ", \n\"execution_times\" : " + measurements_to_str(initial_measurements) + "\n}\n";
+    empty_schedule_json += "}\n";
     schedules_annotations.push_back(empty_schedule_json);
 
     // export the the initial execution time as an env var so that it can be used for adjusting the number of runs by the wrappers
@@ -55,13 +56,13 @@ void auto_scheduler::sample_search_space(std::string filename, bool timeout_sche
     if (timeout_schedules) {
         //define a timeout for scheduler evaluation, the max between schedule_timeout_factor times the initial exec_time (converted to seconds) and 3s per run
         schedule_timeout = std::max(initial_exec_time * schedule_timeout_factor / 1000, (float) 3.0);
-        if (std::atoi(read_env_var("AS_VERBOSE")) == 1)
-            std::cout << "Schedule measurements timeout set to " << schedule_timeout << "*" << read_env_var("MAX_RUNS") << "(MAX_RUNS) s" << std::endl;
+//        if (std::atoi(read_env_var("AS_VERBOSE")) == 1)
+        std::cout << "Schedule measurements timeout set to " << schedule_timeout << "*" << read_env_var("MAX_RUNS") << "(MAX_RUNS) s" << std::endl;
     }
-
     searcher->set_exec_eval(exec_evaluator);
-    searcher->search_save(ast, &schedules_annotations, &exploration_trace_root, schedule_timeout);
+    searcher->explore_fusion(ast, &schedules_annotations, &exploration_trace_root, schedule_timeout);
 
+    
     std::string output_json;
 
 //    std::string nb_exec = "\"default\"";
@@ -76,7 +77,7 @@ void auto_scheduler::sample_search_space(std::string filename, bool timeout_sche
 //                  "\n\t\t\"nb_exec\" : " + nb_exec +
                   "\n\t}, " +
                   "\n\t\"program_annotation\" : " + program_json + ", " +
-                  "\n\t\"initial_execution_time\" : " + std::to_string(initial_exec_time) + ", " +
+                  "\n\t\"initial_execution_time\" : " + std::to_string( - initial_exec_time) + ", " +
                   "\n\t\"schedules_list\" : [\n" ;
 
     for (std::string schedules_annot : schedules_annotations)
@@ -98,15 +99,40 @@ void auto_scheduler::sample_search_space(std::string filename, bool timeout_sche
     file.close();
 
     std::chrono::steady_clock::time_point sampling_end = std::chrono::steady_clock::now();
-    if (std::atoi(read_env_var("AS_VERBOSE"))==1){
-        std::cout << "Search time : " << std::chrono::duration_cast<std::chrono::milliseconds>(sampling_end - sampling_start).count() << " ms" << std::endl;
-        std::cout << "Best execution time : " << searcher->get_best_evaluation() << std::endl;
+//    if (std::atoi(read_env_var("AS_VERBOSE"))==1){
+    std::cout << "Search time : " << std::chrono::duration_cast<std::chrono::milliseconds>(sampling_end - sampling_start).count() << " ms" << std::endl;
+    std::cout << "Best execution time : " << - searcher->get_best_evaluation() << std::endl;
+    syntax_tree* best = searcher->get_best_ast();
+    
+    bool calculate_transformed_execution_time= false;
+    std::vector<float> measurements;
+    if(calculate_transformed_execution_time){
+        measurements = exec_evaluator->get_measurements(*best, false, schedule_timeout);
+        float real_measurement = *std::min_element(measurements.begin(), measurements.end());
+        if (std::atoi(read_env_var("AS_VERBOSE"))==1){
+                std::cout << "Tranformed execution time : " << real_measurement << std::endl;
+        }
     }
+    
+    if (std::atoi(read_env_var("AS_VERBOSE"))==1){
+                std::cout << "Predicted speedup "<< - searcher->get_best_evaluation() << std::endl;
+                std::cout << "===================================" << std::endl << std::endl;
+            }
+    std::ofstream myfile;
+    ///
+    myfile.open ("data/scratch/mmerouani/benchmark_multi_tests_mixed_dataset_model.txt",std::ios_base::app);
+    myfile<<"\""<<filename.substr(2,filename.size()-26)<<"\",";
+    if(calculate_transformed_execution_time) myfile << "\"" << *std::min_element(measurements.begin(), measurements.end()) <<"\"," ;
+    myfile << "\""<< -searcher->get_best_evaluation()<<"\",";
+    myfile << "\"" << best->get_schedule_str() <<"\""<< std::endl;
+    myfile.close();
+//    }
 }
 
 void auto_scheduler::find_schedule()
 {
-    fct->reset_schedules();
+    //fct->reset_schedules();
+    fct->reset_all_static_dims_to_zero();
     if (exec_evaluator != nullptr)
         initial_exec_time = exec_evaluator->evaluate(ast);
     

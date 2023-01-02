@@ -2817,6 +2817,7 @@ void tiramisu::function::prepare_schedules_for_legality_checks(bool reset_static
 
 bool tiramisu::function::loop_unrolling_is_legal(tiramisu::var i , std::vector<tiramisu::computation *> fused_computations)
 {
+    //std::cout<<"function:: loop_unrolling_is_legal "<<std::endl;
     DEBUG_FCT_NAME(3);
     DEBUG_INDENT(4);
 
@@ -2832,23 +2833,22 @@ bool tiramisu::function::loop_unrolling_is_legal(tiramisu::var i , std::vector<t
     DEBUG(3, tiramisu::str_dump(" unrolling check for var : "+i.get_name()));
 
     std::vector<std::string> original_loop_level_names = first_computation->get_loop_level_names();
-
+    //std::cout<<"function:: after get loop level names "<<std::endl;
     std::vector<int> dimensions =
         first_computation->get_loop_level_numbers_from_dimension_names({i.get_name()});
 
     first_computation->check_dimensions_validity(dimensions);
-
+    //std::cout<<"function:: check dimension validity "<<std::endl;
     bool result = true;
 
     for(auto& computation:fused_computations)
     {
-        if(computation->unrolling_is_legal(i) == false)
+        if( computation->unrolling_is_legal(i)== false)
         {
             result = false;
             break;
         }
     }
-
     DEBUG_INDENT(-4);
 
     return result;
@@ -3102,6 +3102,7 @@ std::vector<std::tuple<tiramisu::var,int>> function::correcting_loop_fusion_with
     assert(!current_computation.get_name().empty());
     assert(previous_computations.size() > 0);
     assert(!previous_computations[0]->get_name().empty());
+    assert(!vars_subjected_to_shifting.empty());
 
     std::vector<std::string> loops_names;
 
@@ -3111,6 +3112,7 @@ std::vector<std::tuple<tiramisu::var,int>> function::correcting_loop_fusion_with
     {
         assert(variable.get_name().length() > 0);
         loops_names.push_back(variable.get_name());
+        DEBUG(3, tiramisu::str_dump(variable.get_name()));
         
     }
     //mapping dynamic loop number into the var itself
@@ -5044,5 +5046,26 @@ std::tuple<int,int,int,int,int,int,int,int,int> tiramisu::function::extract_3d_s
                            v1[1],v2[1],v3[1],
                            v1[2],v2[2],v3[2]);
 }
+
+std::vector<int> function::get_potentiel_vectorizable_loop_level(std::vector<tiramisu::computation *> involved_computations)
+{
+    DEBUG_INDENT(4);
+    std::vector<int> result;
+
+    for(auto const& computation:involved_computations)
+    {
+        int val = computation->get_potentiel_vectorizable_loop_level();
+        if(val != -1)
+        {
+            result.push_back(val);
+        }
+    }
+
+    DEBUG_INDENT(-4);
+    
+    return result;
+
+}
+
 
 }

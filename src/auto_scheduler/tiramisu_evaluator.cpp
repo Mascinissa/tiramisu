@@ -34,9 +34,13 @@ evaluate_by_execution::evaluate_by_execution(std::vector<tiramisu::buffer*> cons
        halide_arguments.push_back(buffer_arg);
     }
 }
-
+float evaluate_by_execution::evaluate(syntax_tree& ast, std::string no_sched_json)
+{
+    return 0;
+}
 float evaluate_by_execution::evaluate(syntax_tree& ast)
 {
+    fct->reset_schedules();
     // Apply all the optimizations
     apply_optimizations(ast);
 
@@ -69,8 +73,10 @@ float evaluate_by_execution::evaluate(syntax_tree& ast)
     return exec_time;
 }
 
-std::vector<float> evaluate_by_execution::get_measurements(syntax_tree& ast, bool exit_on_timeout, float timeout)
+std::vector<float> evaluate_by_execution::get_measurements(syntax_tree& ast, bool exit_on_timeout, float timeout, bool code_gen_timeout )
 {
+    // Remove all the optimizations
+    //fct->reset_schedules();
     // Apply all the optimizations
     apply_optimizations(ast);
 
@@ -79,6 +85,7 @@ std::vector<float> evaluate_by_execution::get_measurements(syntax_tree& ast, boo
     fct->gen_time_space_domain();
     fct->gen_isl_ast();
     fct->gen_halide_stmt();
+    if (code_gen_timeout) kill(getppid(), SIGUSR1);
 
     Halide::Module m = lower_halide_pipeline(fct->get_name(), halide_target, halide_arguments,
                                              Halide::Internal::LoweredFunc::External,
@@ -131,11 +138,9 @@ std::vector<float> evaluate_by_execution::get_measurements(syntax_tree& ast, boo
         measurements.push_back(cumulative_timeout*1000); // converted to ms
         std::cout<< "Execution timed out"<< std::endl;
     }
-
-
+    
     // Remove all the optimizations
     fct->reset_schedules();
-
     return measurements;
 }
 
@@ -183,21 +188,29 @@ evaluate_by_learning_model::evaluate_by_learning_model(std::string const& cmd_pa
     model_write = fdopen(outpipe_fd[1], "w");
     model_read = fdopen(inpipe_fd[0], "r");
 }
-
 float evaluate_by_learning_model::evaluate(syntax_tree& ast)
+{
+    return 0;
+}
+float evaluate_by_learning_model::evaluate(syntax_tree& ast, std::string no_sched_json)
 {
     // Get JSON representations for the program, and for the schedule
     std::string prog_json = get_program_json(ast);
     std::string sched_json = get_schedule_json(ast);
-    
+    // std::cout<<prog_json<<std::endl;
+    // std::cout<<sched_json<<std::endl;
+    // std::cout<<no_sched_json<<std::endl;
     // Write the program JSON and the schedule JSON to model_write
     fputs(prog_json.c_str(), model_write);
+    fputs(no_sched_json.c_str(), model_write);
     fputs(sched_json.c_str(), model_write);
+    
     fflush(model_write);
     
     // Read the evaluation from model_read.
     float speedup = 0.f;
     fscanf(model_read, "%f", &speedup);
+    
     
     return -speedup;
 }
@@ -311,7 +324,10 @@ void evaluate_by_learning_model::represent_computations_from_nodes(ast_node *nod
                 comp_json += ",";
         }
         
-        comp_json += "]";
+        comp_json += "],";
+        
+        tiramisu::expr comp_info_expr = comp_info.comp_ptr->get_expr();
+        comp_json += "\"expression_representation\" : " +  comp_info_expr.to_json();
     
         computations_json += "\"" + comp_info.comp_ptr->get_name() + "\" : {" + comp_json + "},";
     }
@@ -321,15 +337,50 @@ void evaluate_by_learning_model::represent_computations_from_nodes(ast_node *nod
         represent_computations_from_nodes(child, computations_json, comp_absolute_order);
 }
 
-std::string evaluate_by_learning_model::get_schedule_json(syntax_tree const& ast)
+void evaluate_by_learning_model::represent_expressions_from_nodes(ast_node *node, std::string& computations_json)
 {
+    // Build the JSON for the computations stored in "node".
+    for (computation_info const& comp_info : node->computations)
+    {
+        tiramisu::computation *comp_info_ptr = comp_info.comp_ptr;
+        tiramisu::expr comp_info_expr = comp_info_ptr->get_expr();
+        computations_json += "\"" + comp_info.comp_ptr->get_name() + "\":" + comp_info_expr.to_json() + ",";
+    }
+
+    // Recursively get JSON for the rest of computations
+    for (ast_node *child : node->children)
+        represent_expressions_from_nodes(child, computations_json);
+}
+/*
+multiply two matrices AxB
+*/
+std::vector<std::vector<int>>  mat_mul(const std::vector<std::vector<int>> & m1, const std::vector<std::vector<int>> & m2)
+{
+std::vector<std::vector<int>> result(m1.size(), std::vector<int>(m2.at(0).size()));
+
+    for(std::size_t row = 0; row < result.size(); ++row) {
+        for(std::size_t col = 0; col < result.at(0).size(); ++col) {
+            for(std::size_t inner = 0; inner < m2.size(); ++inner) {
+                result.at(row).at(col) += m1.at(row).at(inner) * m2.at(inner).at(col);
+            }
+        }
+    }
+    return result;
+}
+std::string evaluate_by_learning_model::get_schedule_json(syntax_tree & ast)
+{
+    std::string sched_json = "{";
+
+    for (tiramisu::computation *comp : ast.computations_list)
+    {
     bool interchanged = false;
     bool tiled = false;
     bool unrolled = false;
     bool skewed = false;
     bool parallelized = false;
-    
-    int unfuse_l0 = -1;
+    bool shifted = false;
+    bool transformed_by_matrix = false;
+
     int int_l0, int_l1;
     int tile_nb_l, tile_l0, tile_l0_fact, tile_l1_fact, tile_l2_fact;
     int unrolling_fact;
@@ -337,16 +388,27 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree const& ast
     int skewing_l0, skewing_l1;
     int skew_extent_l0, skew_extent_l1;
     int parallelized_level;
+    int depth = 0;
+    bool first_time = true;
+    if(ast.new_optims.size()>0) depth = ast.new_optims.at(0).matrix.size();
+    std::vector < std::vector<int> > matrix;
+    std::vector <std::vector < std::vector<int> >> matrices;
+    std::vector<std::pair<int,int>> shiftings; //pairs of loop_level,shift_factor
+
     
     // Get information about the schedule
     for (optimization_info const& optim_info : ast.new_optims)
     {
+        if(std::find(optim_info.comps.begin(), optim_info.comps.end(), comp) == optim_info.comps.end()) {
+           // if the current computation isn't affected by the current optim_info
+           continue;
+        }
         switch (optim_info.type)
         {
-            case optimization_type::UNFUSE:
-                unfuse_l0 = optim_info.l0;
+            case optimization_type::SHIFTING:
+                shifted = true;
+                shiftings.emplace_back(optim_info.l0,optim_info.l0_fact);
                 break;
-                
             case optimization_type::TILING:
                 tiled = true;
                 if (optim_info.nb_l == 2)
@@ -368,9 +430,53 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree const& ast
                 break;
                 
             case optimization_type::INTERCHANGE:
+                
                 interchanged = true;
                 int_l0 = optim_info.l0;
                 int_l1 = optim_info.l1;
+                break;
+
+            case optimization_type::MATRIX:
+                if(first_time){
+                    depth = optim_info.matrix.size();
+                    for(int l = 0; l<depth; l++){
+                        matrix.push_back(std::vector<int>(depth));
+                        for(int c = 0; c<depth; c++){
+                            if (l!=c ){
+                                matrix.at(l).at(c) = 0;
+                            }else{
+                                matrix.at(l).at(c) = 1;
+                            }
+                        }
+                    }
+                    first_time =false;
+                } 
+                transformed_by_matrix = true;
+                    
+                if(optim_info.matrix.size()<matrix.size()){
+                    std::vector <  std::vector<int> >  matrix_padded(matrix.size());
+                    for(int l = 0; l<matrix_padded.size(); l++){
+                        matrix_padded.at(l)= std::vector<int>(matrix.size());
+                        for(int c = 0; c<matrix_padded.size(); c++){
+                            if (l!=c ){
+                                matrix_padded.at(l).at(c) = 0;
+                            }else{
+                                matrix_padded.at(l).at(c) = 1;
+                            }
+                        }
+                    }
+
+                    for(int i=0 ; i<optim_info.matrix.size();i++){
+                        for(int j=0 ; j<optim_info.matrix.size();j++){
+                            matrix_padded.at(i).at(j)= optim_info.matrix.at(i).at(j);
+                        }
+                    }
+                    matrix = mat_mul( matrix_padded, matrix);
+                    matrices.push_back(matrix_padded);
+                }else{
+                    matrices.push_back(optim_info.matrix); 
+                    matrix = mat_mul( optim_info.matrix, matrix);
+                }
                 break;
                 
             case optimization_type::UNROLLING:
@@ -412,15 +518,24 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree const& ast
     
     // Transform the schedule to JSON
     std::vector<dnn_iterator> iterators_list;
-    std::string sched_json = "{";
     
     // Set the schedule for every computation
     // For the moment, all computations share the same schedule
-    for (tiramisu::computation *comp : ast.computations_list)
-    {
+//    for (tiramisu::computation *comp : ast.computations_list)
+//    {
         std::string comp_sched_json;
         iterators_list = dnn_iterator::get_iterators_from_computation(*comp);
-        
+
+        comp_sched_json += "\"shiftings\" : ";
+        if (shifted){
+            comp_sched_json+= "[";
+            for (auto shifting:shiftings)
+                comp_sched_json+= "[\"" + iterators_list[std::get<0>(shifting)].name+"\","+std::to_string(std::get<1>(shifting))+"],";
+            comp_sched_json.pop_back(); //remove last comma
+            comp_sched_json += "], ";
+        }
+        else
+            comp_sched_json += "null,";
         // JSON for interchange
         comp_sched_json += "\"interchange_dims\" : [";
         
@@ -434,7 +549,38 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree const& ast
         }
         
         comp_sched_json += "],";
+        comp_sched_json += "\"transformation_matrices\" : [";
         
+        if (transformed_by_matrix)
+        {
+            for(int i = 0; i < matrices.size(); i++){
+                comp_sched_json += "[";
+                for(int j = 0; j < depth; j++){
+                            for(int k = 0; k< depth; k++){
+                                
+                                comp_sched_json += "\"" + std::to_string(matrices.at(i).at(j).at(k))+"\"";
+                                if(!(j==depth-1 && k==depth-1)) comp_sched_json += ", ";
+                            }
+                }
+                comp_sched_json += "] ";
+                if(i!=matrices.size()-1) comp_sched_json += ", ";
+            }
+        }
+        
+        comp_sched_json += "],";
+        // JSON for matrix
+        comp_sched_json += "\"transformation_matrix\" : [";
+        
+        if (transformed_by_matrix)
+        {
+            for(int i = 0; i < matrix.size(); i++){
+                        for(int j = 0; j< matrix.size(); j++){
+                            comp_sched_json += "\"" + std::to_string(matrix.at(i).at(j))+"\"";
+                            if(!(i==matrix.size()-1 && j==matrix.size()-1)) comp_sched_json += ", ";
+                        }
+            }
+        }
+        comp_sched_json += "]," ;
         // JSON for tiling
         comp_sched_json += "\"tiling\" : {";
         
@@ -505,57 +651,57 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree const& ast
         {
             comp_sched_json += "{\"skewed_dims\" : [\""+ iterators_list[skewing_l0].name + "\", " + "\"" + iterators_list[skewing_l1].name + "\"],";
             comp_sched_json += "\"skewing_factors\" : ["+std::to_string(skewing_fact_l0)+","+std::to_string(skewing_fact_l1)+"],";
-            comp_sched_json += "\"average_skewed_extents\" : ["+std::to_string(skew_extent_l0)+","+std::to_string(skew_extent_l1)+"], ";
+            comp_sched_json += "\"average_skewed_extents\" : ["+std::to_string(skew_extent_l0)+","+std::to_string(skew_extent_l1)+"]} ";
 
             // Adding the access matrices transformed by skewing
 
             // get the comp_info corresponding to the current computation
-            ast_node* comp_node = ast.computations_mapping.at(comp);
-            std::vector<dnn_access_matrix> comp_accesses_list;
-            for (auto comp_i: comp_node->computations)
-            {
-                if (comp_i.comp_ptr == comp)
-                {
-                    comp_accesses_list = comp_i.accesses.accesses_list;
-                    break;
-                }
-            }
+//            ast_node* comp_node = ast.computations_mapping.at(comp);
+//            std::vector<dnn_access_matrix> comp_accesses_list;
+//            for (auto comp_i: comp_node->computations)
+//            {
+//                if (comp_i.comp_ptr == comp)
+//                {
+//                    comp_accesses_list = comp_i.accesses.accesses_list;
+//                    break;
+//                }
+//            }
 
-            // Build JSON of the transformed accesses
-            comp_sched_json += "\"transformed_accesses\" : [";
-
-            for (int i = 0; i < comp_accesses_list.size(); ++i)
-            {
-                dnn_access_matrix const& matrix  = comp_accesses_list[i];
-                comp_sched_json += "{";
-
-                comp_sched_json += "\"buffer_id\" : " + std::to_string(matrix.buffer_id) + ",";
-                comp_sched_json += "\"access_matrix\" : [";
-
-                for (int x = 0; x < matrix.matrix.size(); ++x)
-                {
-                    comp_sched_json += "[";
-                    for (int y = 0; y < matrix.matrix[x].size(); ++y)
-                    {
-                        comp_sched_json += std::to_string(matrix.matrix[x][y]);
-                        if (y != matrix.matrix[x].size() - 1)
-                            comp_sched_json += ", ";
-                    }
-
-                    comp_sched_json += "]";
-                    if (x != matrix.matrix.size() - 1)
-                        comp_sched_json += ",";
-                }
-
-                comp_sched_json += "]";
-
-                comp_sched_json += "}";
-
-                if (i != comp_accesses_list.size() - 1)
-                    comp_sched_json += ",";
-            }
-
-            comp_sched_json += "]}";
+//            // Build JSON of the transformed accesses
+//            comp_sched_json += "\"transformed_accesses\" : [";
+//
+//            for (int i = 0; i < comp_accesses_list.size(); ++i)
+//            {
+//                dnn_access_matrix const& matrix  = comp_accesses_list[i];
+//                comp_sched_json += "{";
+//
+//                comp_sched_json += "\"buffer_id\" : " + std::to_string(matrix.buffer_id) + ",";
+//                comp_sched_json += "\"access_matrix\" : [";
+//
+//                for (int x = 0; x < matrix.matrix.size(); ++x)
+//                {
+//                    comp_sched_json += "[";
+//                    for (int y = 0; y < matrix.matrix[x].size(); ++y)
+//                    {
+//                        comp_sched_json += std::to_string(matrix.matrix[x][y]);
+//                        if (y != matrix.matrix[x].size() - 1)
+//                            comp_sched_json += ", ";
+//                    }
+//
+//                    comp_sched_json += "]";
+//                    if (x != matrix.matrix.size() - 1)
+//                        comp_sched_json += ",";
+//                }
+//
+//                comp_sched_json += "]";
+//
+//                comp_sched_json += "}";
+//
+//                if (i != comp_accesses_list.size() - 1)
+//                    comp_sched_json += ",";
+//            }
+//
+//            comp_sched_json += "]}";
 
         }
         else
@@ -563,16 +709,32 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree const& ast
             comp_sched_json += "null";
         }
         
-        sched_json += "\"" + comp->get_name() + "\" : {" + comp_sched_json + "},";
+        sched_json += "\"" + comp->get_name() + "\" : {" + comp_sched_json + "}, ";
     }
     
-    // Write JSON information about unfused iterators (not specific to a computation)
-    sched_json += "\"unfuse_iterators\" : ["; 
-    if (unfuse_l0 != -1)
-        sched_json += "\"" + iterators_list[unfuse_l0].name + "\"";
+//    // Write JSON information about unfused iterators (not specific to a computation)
+//    sched_json += "\"unfuse_iterators\" : [";
+//    if (unfuse_l0 != -1)
+//        sched_json += "\"" + iterators_list[unfuse_l0].name + "\"";
         
-    sched_json += "],";
-    
+//    sched_json += "],";
+
+    bool has_fusions = false;
+    sched_json += "\"fusions\" : [";
+    for (optimization_info const& optim_info : ast.new_optims)
+        if (optim_info.type==optimization_type::FUSION) {
+            sched_json += " [\"" + optim_info.comps[0]->get_name() + "\",\"" + optim_info.comps[1]->get_name() + "\"," +
+                          std::to_string(optim_info.l0) + "],"; //Fusion ordered with the .then semantic
+            has_fusions=true;
+        }
+    sched_json.pop_back(); //drop the last comma or '['
+    if (has_fusions)
+        sched_json +="], ";
+    else
+        sched_json += "null, ";
+
+    sched_json += "\"sched_str\": \"" + ast.get_schedule_str() + "\", ";
+
     // Write the structure of the tree
     sched_json += "\"tree_structure\": {";
     sched_json += ast.tree_structure_json;

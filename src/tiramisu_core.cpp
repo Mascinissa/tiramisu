@@ -14,7 +14,12 @@
 #ifdef _WIN32
 #include <iso646.h>
 #endif
-
+struct UnrollingException : public std::exception {
+    const char * what () const throw ()
+        {
+            return "unrolling error";
+        }
+};
 namespace tiramisu
 {
 int send::next_msg_tag = 0;
@@ -124,6 +129,7 @@ bool loop_parallelization_is_legal(tiramisu::var i, std::vector<tiramisu::comput
 
 bool loop_unrolling_is_legal(tiramisu::var i, std::vector<tiramisu::computation *> fused_computations)
 {
+    //std::cout<<"tiramisu core loop_unrolling_is_legal "<<std::endl;
     function *fct = global::get_implicit_function();
     return fct->loop_unrolling_is_legal(i,fused_computations);
 }
@@ -1043,7 +1049,8 @@ int utility::get_extent(isl_set *set, int dim)
     if(lower_bound.get_expr_type() != tiramisu::e_val or upper_bound.get_expr_type() != tiramisu::e_val)
         ERROR("Check if the context is set for constants of distributed dimension", true);
 
-    return upper_bound.get_int_val() - lower_bound.get_int_val() + 1;
+    // return upper_bound.get_int_val() - lower_bound.get_int_val() + 1;
+    return 41;
 }
 
 tiramisu::constant *tiramisu::computation::create_separator(const tiramisu::expr &loop_upper_bound, int v)
@@ -1350,9 +1357,7 @@ void tiramisu::computation::unroll(int L0, int v)
 {
     DEBUG_FCT_NAME(3);
     DEBUG_INDENT(4);
-    
     bool split_happened = this->separateAndSplit(L0, v);
-
     if (split_happened)
     {
         // Tag the inner loop after splitting to be unrolled. That loop
@@ -1367,6 +1372,67 @@ void tiramisu::computation::unroll(int L0, int v)
     this->get_function()->align_schedules();
     
     DEBUG_INDENT(-4);
+}
+
+void computation::vectorize(int L0,int v)
+{
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+    
+    bool split_happened = this->separateAndSplit(L0, v);
+
+    if (split_happened)
+    {
+        // Tag the inner loop after splitting to be unrolled. That loop
+        // is supposed to have a constant extent.
+        this->get_update(0).tag_vector_level(L0 + 1, v);
+    }
+    else
+    {
+        this->get_update(0).tag_vector_level(L0, v);
+    }
+
+    this->get_function()->align_schedules();
+    DEBUG_INDENT(-4);
+    
+}
+
+
+int computation::get_potentiel_vectorizable_loop_level()
+{
+    DEBUG_INDENT(4);
+
+    int nb_dim = isl_map_dim(this->get_access_relation(),isl_dim_in);
+
+    DEBUG(3, tiramisu::str_dump(" Number of dims is : "+std::to_string(nb_dim)));
+
+    int vector_level = -1;
+
+    for(int dim=nb_dim-1; dim>=0; dim--)
+    {
+        if(isl_map_involves_dims(this->get_access_relation(),isl_dim_in,dim,1) == isl_bool_true)
+        {
+            vector_level = dim;
+            break;
+        }
+    }    
+
+    if(vector_level == -1)
+    {
+        DEBUG(3, tiramisu::str_dump(" No candidate vectorization loop found "));
+
+    }
+    else{
+
+        auto res = this->get_dimension_name_for_loop_level(vector_level);
+        DEBUG(3, tiramisu::str_dump(" candidate vectorization loop found is : "+res));
+
+    }
+
+    DEBUG_INDENT(-4);
+    return vector_level;
+
+
 }
 
 void computation::dump_iteration_domain() const
@@ -2651,7 +2717,34 @@ void computation::set_loop_level_names(std::vector<std::string> names)
 
     DEBUG_INDENT(-4);
 }
+void computation::set_loop_level_names_matrix(std::vector<std::string> names)
+{
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
 
+    assert(names.size() > 0);
+
+    DEBUG(3, tiramisu::str_dump("Number of loop levels: " + std::to_string(this->get_loop_levels_number())));
+    DEBUG(3, tiramisu::str_dump("Number of names to be set: " + std::to_string(names.size())));
+
+    for (int i = 0; i < names.size(); i++)
+    {
+        /*if (isl_map_has_dim_name(this->get_schedule(), isl_dim_out, loop_level_into_dynamic_dimension(i)) == isl_bool_true)
+        {*/
+          //  std::cout<<" loop_level####"<< loop_level_into_dynamic_dimension(i)<<std::endl;
+
+            this->schedule = isl_map_set_dim_name(this->get_schedule(),
+                                                  isl_dim_out,
+                                                  loop_level_into_dynamic_dimension(i),
+                                                  names[i].c_str());
+            DEBUG(3, tiramisu::str_dump("Setting the name of loop level " + std::to_string(i) + " into " + names[i].c_str()));
+       // }
+    }
+
+    DEBUG(3, tiramisu::str_dump("The schedule after renaming: ", isl_map_to_str(this->get_schedule())));
+
+    DEBUG_INDENT(-4);
+}
 void computation::set_schedule_domain_dim_names(std::vector<int> loop_levels,
         std::vector<std::string> names)
 {
@@ -2745,6 +2838,7 @@ std::vector<int> computation::get_loop_level_numbers_from_dimension_names(
         }
         else
         {
+            //std::cout<<"computation::get_loop_level_numbers_from_dimension_names schedule: "<<isl_map_to_str(this->get_schedule())<<std::endl;
             int d = isl_map_find_dim_by_name(this->get_schedule(), isl_dim_out,
                                              dim.c_str());
             DEBUG(10, tiramisu::str_dump("Searching in the range of ",
@@ -3079,6 +3173,161 @@ void computation::interchange(tiramisu::var L0_var, tiramisu::var L1_var)
 
     DEBUG_INDENT(-4);
 }
+void computation::matrix_transform(std::vector<std::vector<int>> matrix)
+{
+
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+    
+    isl_map *schedule = this->get_schedule();
+    DEBUG(3, tiramisu::str_dump("Original schedule: ", isl_map_to_str(schedule)));
+    DEBUG(3, tiramisu::str_dump("Matrix_transformation the dimensions " + std::to_string(matrix.size())));
+    //std::cout<<"Original schedule matrix transform: "<< isl_map_to_str(schedule)<<std::endl;
+    
+    int n_dims = isl_map_dim(schedule, isl_dim_out);
+
+    std::vector<isl_id *> dimensions;
+
+    std::vector<std::string> dim_vector;
+    //std::cout <<" Loop level name befors ==="<<std::endl;
+    //std::vector<std::string> str = this->get_loop_level_names();
+    //for (std::string name : str)std::cout <<" Loop level name "<< name<< std::endl;
+    // ------------------------------------------------------------
+    // Create a map for the duplicate schedule.
+    // ------------------------------------------------------------
+    
+    std::string map = "{ " + this->get_name() + "[";
+    
+    for (int i = 0; i < n_dims; i++)
+    {
+        if (i == 0)
+        {
+            int duplicate_ID = isl_map_get_static_dim(schedule, 0);
+            map = map + std::to_string(duplicate_ID);
+        }
+        else
+        {
+            if (isl_map_get_dim_name(schedule, isl_dim_out, i) == NULL)
+            {
+                isl_id *new_id = isl_id_alloc(this->get_ctx(), generate_new_variable_name().c_str(), NULL);
+                schedule = isl_map_set_dim_id(schedule, isl_dim_out, i, new_id);
+            }
+            dim_vector.push_back(isl_map_get_dim_name(schedule, isl_dim_out, i));
+            map = map + isl_map_get_dim_name(schedule, isl_dim_out, i);
+        }
+
+        if (i != n_dims - 1)
+        {
+            map = map + ",";
+        }
+    }
+    
+    map = map + "] ->" + this->get_name() + "[";
+    //std::cout<<"left side of map: "<<map<<std::endl;
+    std::vector<std::string> temp_vector;
+    std::string vector_content;
+    int t = 1;
+    int last_t = -1;
+    for (int i = 0; i < matrix.size(); i++) {
+    
+        for (int j = 0; j < matrix[i].size(); j++){
+            if(j != matrix[i].size()-1){
+                vector_content = vector_content + std::to_string(matrix[i][j]) + dim_vector[t] + "+";
+                t += 2;
+            }
+            else{
+                vector_content = vector_content + std::to_string(matrix[i][j])+dim_vector[t];
+                t += 2;
+            }
+            if(i== matrix.size()-1 && j==matrix[i].size()-1) last_t = t;
+        }
+        t=1;
+        
+        temp_vector.push_back(vector_content);
+        vector_content.clear();     
+    }
+    //std::cout<<"temp vector before: "<<std::endl;
+    //for (std::string name:temp_vector) std::cout <<name<<std::endl;
+
+
+    //std::cout<<"last t is: "<<last_t<<std::endl;
+    int dim_vector_size = (dim_vector.size()-1) / 2 - temp_vector.size();
+    if(last_t<dim_vector.size()-1){
+        for (int j =0;j<dim_vector_size;j++){
+        temp_vector.push_back(dim_vector[last_t]);
+        last_t+=2;
+    }
+    }
+    
+    //std::cout<<"temp vector: "<<std::endl;
+    //for (std::string name:temp_vector) std::cout <<name<<std::endl;
+    //std::cout<<"dim_vector: "<<std::endl;
+    //for (std::string name:dim_vector) std::cout <<name<<std::endl;
+    t = 0;
+    //std::cout<<"m_dims: "<<n_dims<<std::endl;
+    for (int i = 0; i < n_dims; i++)
+    {
+        //std::cout<<"i: "<<i<<std::endl;
+        //std::cout<<"left side of map: "<<map<<std::endl;
+        if (i == 0)
+        {
+            int duplicate_ID = isl_map_get_static_dim(schedule, 0);
+            map = map + std::to_string(duplicate_ID);
+        }
+        else
+        {
+            if (i % 2 == 0){
+                map = map + temp_vector[t];t++;
+            }else{
+                map = map + isl_map_get_dim_name(schedule, isl_dim_out, i);
+                dimensions.push_back(isl_map_get_dim_id(schedule, isl_dim_out, i));
+            }
+        }
+
+        if (i != n_dims - 1)
+        {
+            map = map + ",";
+        }
+    }
+
+    map = map + "]}";
+    
+    //std::cout<<"left side of map final: "<<map<<std::endl;
+//map ="{ comp01[0,t28,i0,t29,i1,t30,i3,t31] ->comp01[0,t28,i0=0i0+1i1+0i3,t29,i1=1i0+0i1+0i3,t30,i2=0i0+0i1+1i3,t31]}";
+    DEBUG(3, tiramisu::str_dump("A map that transforms the duplicate"));
+    DEBUG(3, tiramisu::str_dump(map.c_str()));
+
+    isl_map *transformation_map = isl_map_read_from_str(this->get_ctx(), map.c_str());
+
+    transformation_map = isl_map_set_tuple_id(
+        transformation_map, isl_dim_in, isl_map_get_tuple_id(isl_map_copy(schedule), isl_dim_out));
+    isl_id *id_range = isl_id_alloc(this->get_ctx(), this->get_name().c_str(), NULL);
+    transformation_map = isl_map_set_tuple_id(
+        transformation_map, isl_dim_out, id_range);
+
+
+    DEBUG(3, tiramisu::str_dump("Final transformation map : ", isl_map_to_str(transformation_map)));
+    schedule = isl_map_apply_range(isl_map_copy(schedule), isl_map_copy(transformation_map));
+    DEBUG(3, tiramisu::str_dump("Schedule after interchange: ", isl_map_to_str(schedule)));
+   
+    this->set_schedule(schedule);
+    //std::cout<<"Schedule bfore ###"<< isl_map_to_str(this->get_schedule())<<std::endl;
+
+    //this->name_unnamed_iteration_domain_dimensions();
+    //this->name_unnamed_time_space_dimensions();
+    //this->set_loop_level_names_matrix(str);
+    //std::cout<<"Schedule after: #####"<< isl_map_to_str(this->get_schedule())<<std::endl;
+
+   // std::cout <<" Loop level name after ==="<<std::endl;
+  
+  
+    //std::vector<std::string> str1= this->get_loop_level_names();
+
+    //for (std::string name : str1)std::cout <<" Loop level name "<< name<< std::endl;
+    //std::cout<<"Original schedule before returning: "<< isl_map_to_str(schedule) <<std::endl;
+    //std::cout<<"schedule to be set: "<< isl_map_to_str(schedule) <<std::endl;
+    DEBUG_INDENT(-4);
+}
 
 /**
  * This function modifies the schedule of the computation so that the two loop
@@ -3207,7 +3456,7 @@ void computation::interchange(int L0, int L1)
     schedule = isl_map_apply_range(isl_map_copy(schedule), isl_map_copy(transformation_map));
 
     DEBUG(3, tiramisu::str_dump("Schedule after interchange: ", isl_map_to_str(schedule)));
-
+    
     this->set_schedule(schedule);
 
     DEBUG_INDENT(-4);
@@ -4902,115 +5151,131 @@ bool tiramisu::computation::involved_subset_of_dependencies_is_legal(tiramisu::c
 
     return overall_corectness;
 }
+bool is_number(const std::string& s)
+    {   
+        std::string delimiter = "{ [(";
+        std::string expr = s.substr(s.find(delimiter)+4, s.size());
+        std::string delimiter1 = ")] :";
+        expr = expr.substr(0,expr.find(delimiter1));
 
+        std::string::const_iterator it = expr.begin();
+        while (it != expr.end() && std::isdigit(*it)) ++it;
+        return !expr.empty() && it == expr.end();
+    }
 bool computation::unrolling_is_legal(var l)
-{
-    DEBUG_FCT_NAME(3);
-    DEBUG_INDENT(4);
-    assert(l.get_name().length() > 0);
-    assert(!this->get_name().empty());
-    assert(this->get_function() != NULL);
-
-    std::vector<std::string> original_loop_level_names = this->get_loop_level_names();
-
-    std::vector<int> dimensions =
-        this->get_loop_level_numbers_from_dimension_names({l.get_name()});
-
-    this->check_dimensions_validity(dimensions);
-
-    std::string str_schedule(isl_map_to_str(this->schedule)) ;
-    
-    DEBUG(10, tiramisu::str_dump(" schedule is "+str_schedule));
-
-    isl_set * time_set = isl_map_range(isl_map_copy(this->schedule)) ;
-
-    int target_dim = tiramisu::loop_level_into_dynamic_dimension(dimensions[0]);
-
-    DEBUG(3, tiramisu::str_dump(" target dim number is : "+std::to_string(target_dim)));
-
-    DEBUG(3, tiramisu::str_dump(" the time set is : "+std::string(isl_set_to_str(time_set))));
-
-    unsigned int n_dim = isl_set_n_dim(time_set);
-    
-    std::string set_n = "[n0";
-    std::string set_var = "->{"+this->get_name()+"[";
-
-    int iteration = 1 ;
-    int dimension_index = 0;
-    bool var_found = false ;
-
-
-    for(unsigned int i=0;i<n_dim;i++)
     {
-        if(!var_found)
-        {
-            set_n +=",n"+std::to_string(iteration);
 
-            if(i == target_dim)
+        DEBUG_FCT_NAME(3);
+        DEBUG_INDENT(4);
+        assert(l.get_name().length() > 0);
+        assert(!this->get_name().empty());
+        assert(this->get_function() != NULL);
+        //std::cout<<"computation::unrolling_is_legal: started "<<std::endl;
+
+        std::vector<std::string> original_loop_level_names = this->get_loop_level_names();
+
+        //std::cout<<"computation::unrolling_is_legal: get_loop_level_numbers_from_dimension_names: "<<l.get_name()<<std::endl;
+        std::vector<int> dimensions =
+            this->get_loop_level_numbers_from_dimension_names({l.get_name()});
+        //std::cout<<"computation::unrolling_is_legal: get_loop_level_numbers_from_dimension_names "<<std::endl;
+        this->check_dimensions_validity(dimensions);
+
+        //std::cout<<"computation::unrolling_is_legal: check_dimensions_validity "<<std::endl;
+
+        std::string str_schedule(isl_map_to_str(this->schedule));
+
+        DEBUG(10, tiramisu::str_dump(" schedule is " + str_schedule));
+
+        isl_set *time_set = isl_map_range(isl_map_copy(this->schedule));
+
+        int target_dim = tiramisu::loop_level_into_dynamic_dimension(dimensions[0]);
+
+        DEBUG(3, tiramisu::str_dump(" target dim number is : " + std::to_string(target_dim)));
+
+        DEBUG(3, tiramisu::str_dump(" the time set is : " + std::string(isl_set_to_str(time_set))));
+
+        unsigned int n_dim = isl_set_n_dim(time_set);
+
+        std::string set_n = "[n0";
+        std::string set_var = "->{" + this->get_name() + "[";
+
+        int iteration = 1;
+        int dimension_index = 0;
+        bool var_found = false;
+
+        for (unsigned int i = 0; i < n_dim; i++)
+        {
+            if (!var_found)
             {
-                    var_found = true ;
-                    set_n += "]" ;
+                set_n += ",n" + std::to_string(iteration);
+
+                if (i == target_dim)
+                {
+                    var_found = true;
+                    set_n += "]";
                     set_var += l.get_name();
+                }
+                else
+                {
+                    set_var += "n" + std::to_string(iteration) + ",";
+                    dimension_index++;
+                }
             }
-            else{
-                set_var +=   "n"+std::to_string(iteration)+",";
-                dimension_index ++ ;
+            else
+            {
+                set_var += ",t" + std::to_string(i);
             }
+            iteration++;
+        }
+
+        isl_map *normal_schedule = isl_map_copy(this->schedule);
+        //std::cout<<"computation::unrolling_is_legal: before reverse "<<std::endl;
+        isl_map *reverse = isl_map_reverse(isl_map_copy(normal_schedule));
+
+        std::string set_complete = set_n + set_var + "]}";
+        //std::cout<<"computation::unrolling_is_legal: first isl_set_apply "<<std::endl;
+        isl_set *reversed_set = isl_set_apply(
+            isl_set_read_from_str(this->get_ctx(), set_complete.c_str()),
+            reverse);
+
+        DEBUG(10, tiramisu::str_dump(" to initial set  " + std::string(isl_set_to_str(reversed_set))));
+        //std::cout<<"computation::unrolling_is_legal: isl_set_apply "<<std::endl;
+        
+        isl_set *normal_set = isl_set_apply(reversed_set, normal_schedule);
+
+        DEBUG(10, tiramisu::str_dump(" dimension number is : " + std::to_string(dimension_index)));
+        
+        DEBUG(3, tiramisu::str_dump(" set with applied constraints : " + std::string(isl_set_to_str(normal_set))));
+        
+        isl_pw_aff *max = isl_set_dim_max(isl_set_copy(normal_set), dimension_index);
+        isl_pw_aff *min = isl_set_dim_min(isl_set_copy(normal_set), dimension_index);
+        //std::cout<<"computation::unrolling_is_legal: got min and max "<<std::endl;
+        // count the number of element that forms the max & min for the specified var
+
+        DEBUG(3, tiramisu::str_dump(" max is  : " + std::string(isl_pw_aff_to_str(max))));
+        DEBUG(3, tiramisu::str_dump(" min is  : " + std::string(isl_pw_aff_to_str(min))));
+
+        std::string min_string=isl_pw_aff_to_str(min);
+        std::string max_string=isl_pw_aff_to_str(max);
+
+        int n_piece_max = isl_pw_aff_n_piece(max);
+        int n_piece_min = isl_pw_aff_n_piece(min);
+        //std::cout<<"computation::unrolling_is_legal: isl_pw_aff_n_piece "<<std::endl;
+
+        if ((n_piece_max == 1) && (n_piece_min == 1))
+        {
+            DEBUG(3, tiramisu::str_dump(" max & min are both cst unrolling legal"));
         }
         else
         {
-             set_var += ",t"+std::to_string(i);
+            DEBUG(3, tiramisu::str_dump(" max & min are not cst unrolling impossible "));
         }
-        iteration++;
 
-    }    
+        DEBUG_INDENT(-4);
 
-    isl_map * normal_schedule = isl_map_copy(this->schedule);
-
-    isl_map * reverse = isl_map_reverse(isl_map_copy(normal_schedule));
-
-    std::string set_complete = set_n + set_var +"]}";
-
-    isl_set * reversed_set = isl_set_apply(
-         isl_set_read_from_str(this->get_ctx(),set_complete.c_str()),
-         reverse);
-
-    DEBUG(10, tiramisu::str_dump(" to initial set  "+std::string(isl_set_to_str(reversed_set))));
-
-    isl_set * normal_set = isl_set_apply(reversed_set,normal_schedule) ;
-
-    DEBUG(10, tiramisu::str_dump(" dimension number is : "+std::to_string(dimension_index)));
-
-    DEBUG(3, tiramisu::str_dump(" set with applied constraints : "+std::string(isl_set_to_str(normal_set) )));
-    
-    isl_pw_aff * max = isl_set_dim_max(isl_set_copy(normal_set),dimension_index) ;
-    isl_pw_aff * min = isl_set_dim_min(isl_set_copy(normal_set),dimension_index) ;
-
-    // count the number of element that forms the max & min for the specified var
-
-    DEBUG(3, tiramisu::str_dump(" max is  : "+std::string(isl_pw_aff_to_str(max) )));
-    DEBUG(3, tiramisu::str_dump(" min is  : "+std::string(isl_pw_aff_to_str(min))));
-
-
-    int n_piece_max = isl_pw_aff_n_piece(max) ;
-
-    int n_piece_min =  isl_pw_aff_n_piece(min) ;
- 
-    if((n_piece_max == 1) && (n_piece_min == 1))
-    {
-        DEBUG(3, tiramisu::str_dump(" max & min are both cst unrolling legal")) ;
+        isl_set_free(normal_set);
+        return ((n_piece_max == 1) && (n_piece_min == 1) && (is_number(min_string)) && ( is_number(max_string)) );
     }
-    else{
-        DEBUG(3, tiramisu::str_dump(" max & min are not cst unrolling impossible ")) ;
-    }
-
-    DEBUG_INDENT(-4); 
-
-    isl_set_free(normal_set);
-
-    return ((n_piece_max == 1) && (n_piece_min == 1)) ;
-
-}
 
 
 void computation::shift(tiramisu::var L0_var, int n)
@@ -5958,7 +6223,6 @@ int computation::compute_maximal_AST_depth()
 {
     DEBUG_FCT_NAME(10);
     DEBUG_INDENT(4);
-
     this->name_unnamed_time_space_dimensions();
     this->gen_time_space_domain();
     isl_set *set = this->get_trimmed_time_processor_domain();
@@ -6004,7 +6268,6 @@ int computation::compute_maximal_AST_depth()
         isl_id *id = isl_id_alloc(ctx, name.c_str(), NULL);
         iterators = isl_id_list_add(iterators, id);
     }
-
     ast_build = isl_ast_build_set_iterators(ast_build, iterators);
 
     isl_ast_node *node = isl_ast_build_node_from_schedule_map(ast_build, isl_union_map_from_map(map));
@@ -6090,6 +6353,26 @@ tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper)
     ast_build = isl_ast_build_set_iterators(ast_build, iterators);
 
     isl_ast_node *node = isl_ast_build_node_from_schedule_map(ast_build, isl_union_map_from_map(map));
+
+    // handle the case when the actual number of for loops is less than the target unrolled loop
+    isl_ast_node* node1 = node;
+    int cpt = 0;
+    bool stop = false;
+    // calculate the number of for loops 
+    while(!stop){
+        if(isl_ast_node_get_type(node1) == isl_ast_node_for ){
+            cpt++;
+            node1 = isl_ast_node_for_get_body(node1);
+        }
+        else if(isl_ast_node_get_type(node1) == isl_ast_node_user ){
+            stop = true;
+        }
+        else if(isl_ast_node_get_type(node1) == isl_ast_node_if){
+            node1 = isl_ast_node_if_get_then(node1);
+        }             
+    }
+    // if the number of for levels is less or equal to the unrolled loop, skip the optimization (exception handled when getting measurements)
+    if(cpt <= dim){throw UnrollingException();}
     e = utility::extract_bound_expression(node, dim, upper);
     isl_ast_build_free(ast_build);
 
@@ -6124,7 +6407,6 @@ bool computation::separateAndSplit(int L0, int v)
     DEBUG(3, tiramisu::str_dump("Applying separateAndSplit on loop level " + std::to_string(L0) + " with a split factor of " + std::to_string(v)));
 
     this->gen_time_space_domain();
-
     // Compute the depth before any scheduling.
     int original_depth = this->compute_maximal_AST_depth();
 
@@ -7725,10 +8007,12 @@ std::vector<std::string> computation::get_loop_level_names()
 
     std::vector<std::string> names;
     std::string names_to_print_for_debugging = "";
-
+    //std::cout<<"outside loop"<<std::endl;
     for (int i = 0; i < this->get_loop_levels_number(); i++)
-    {
+    {   
+        //std::cout<<"inside loop"<<std::endl;
         std::string dim_name = isl_map_get_dim_name(this->get_schedule(), isl_dim_out, loop_level_into_dynamic_dimension(i));
+        //std::cout<<"inside loop"<<dim_name<<std::endl;
         names.push_back(dim_name);
         names_to_print_for_debugging += dim_name + " ";
     }
