@@ -27,7 +27,7 @@ int main(int argc, char **argv){
 	comp01.store_in(&buf02);
 
 	prepare_schedules_for_legality_checks();
-	performe_full_dependency_analysis();
+	perform_full_dependency_analysis();
 
 	const int beam_size = get_beam_size();
 	const int max_depth = get_max_depth();
