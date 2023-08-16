@@ -123,6 +123,10 @@ void auto_scheduler::find_schedule()
     std::cout << "NB explored schedules : " << searcher->get_nb_explored_schedules() << std::endl;
     std::cout << "Best evaluation : " << searcher->get_best_evaluation() << std::endl;
     syntax_tree *best_ast = searcher->get_best_ast();
+    if (best_ast == nullptr){
+        std::cout<<"No legal schedules found in exploration."<<std::endl;
+        return;
+    }
     std::cout<<"Best schedule : " <<best_ast->get_schedule_str()<<std::endl;
     
     if (exec_evaluator != nullptr)
@@ -135,6 +139,12 @@ void auto_scheduler::find_schedule()
 void auto_scheduler::apply_best_schedule()
 {
     syntax_tree *best_ast = searcher->get_best_ast();
+    if (best_ast == nullptr)
+        return;
+    std::ofstream myfile;
+    std::string funcname = read_env_var("FUNC_NAME");
+    myfile.open(read_env_var("LOG_FILE_PATH"), std::ios_base::app);
+    myfile<<"\""<<funcname<<"\",";
     std::cout<<best_ast->get_schedule_str()<<std::endl;
 
     best_ast->print_ast();
@@ -147,8 +157,11 @@ void auto_scheduler::apply_best_schedule()
         std::vector<float> measurements = exec_evaluator->get_measurements(*best_ast);
         float best_sched_exec_time = min_eval(measurements);
         std::cout << "Best schedule exec time : " << best_sched_exec_time << std::endl;
+        myfile << "\""<< best_sched_exec_time<<"\",";
+        myfile << "\"" << best_ast->get_schedule_str() <<"\""<< std::endl;
         std::cout << "Speedup : " << initial_exec_time / best_sched_exec_time << std::endl;
     }
+    myfile.close();
 }
 
 }

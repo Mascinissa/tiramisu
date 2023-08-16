@@ -1020,7 +1020,6 @@ std::vector<syntax_tree *> ml_model_schedules_generator::generate_schedules(synt
 
     case optimization_type::UNROLLING: {
         ast.stage_isl_states();
-
         node->get_innermost_nodes(innermost_nodes);
 
         //check that the sbutree starting from node is a branch (has no splits)
@@ -1032,25 +1031,37 @@ std::vector<syntax_tree *> ml_model_schedules_generator::generate_schedules(synt
             ast.recover_isl_states();
             return states;
         }
-
+        //search for possible unrolling from the bottom loop until one is found
+        // Apply all possible unrolling factors to all innermost iterators
+        //test unrolling for all inner nodes until we find a valid
+        bool result = true;
+        // In the case where complicated transformations are applied, we can't trust that the Tiramisu AST reflects all the changes
+        // Instead, we retrieve the accurate depth of the branch to be unrolling using the isl AST
+        int unrolling_depth = -1;
+        
         //search for possible unrolling from the bottom loop until one is found
         // Apply all possible unrolling factors to all innermost iterators
         //test unrolling for all inner nodes until we find a valid
         for (ast_node *inner_most_node: innermost_nodes) {
             std::vector<tiramisu::computation *> involved_computations;
             inner_most_node->get_innermost_computations(involved_computations);
+            for (auto comp: involved_computations){
+                std::vector<std::string> loop_names = comp->get_loop_level_names();
+                std::vector<tiramisu::computation *> involved_comp_first; 
+                involved_comp_first.push_back(comp);
+                std::string loop_name = loop_names[inner_most_node->depth];
 
-            std::vector<std::string> loop_names = involved_computations[0]->get_loop_level_names();
-
-            std::string loop_name = loop_names[inner_most_node->depth];
-
-            bool result = (!inner_most_node->is_optimized_by_tag()) &&
-                          ast.fct->loop_unrolling_is_legal(var(loop_name), involved_computations);
-
+                // The index of the loop to unrolling is the number of for loops containing this computations - 1
+                // The number of loops containing the computation is the maximal AST depth - 1 (the compute_maximal_AST_depth counts the user node in the depth)
+                unrolling_depth = comp->compute_maximal_AST_depth() - 2;
+                result = result && (!inner_most_node->is_optimized_by_tag()) &&
+                                ast.fct->loop_unrolling_is_legal(var(loop_name), involved_comp_first);
+                
+            }
             if (result) // unrollable: test all possible values
             {
                 ast.recover_isl_states();
-
+                
                 for (int unrolling_fact: unrolling_factors_list) {
 
                     if (can_split_iterator(inner_most_node->get_extent(), unrolling_fact)) {

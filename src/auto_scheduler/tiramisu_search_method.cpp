@@ -68,9 +68,9 @@ void beam_search::search(syntax_tree& ast)
             // print deleted Ast 
 //            (*iterator)->print_previous_optims();
             std::cout << "\n-----------" << std::endl;
-//            (*iterator)->print_new_optims();
-//            (*iterator)->print_ast();
-//            (*iterator)->print_isl_states();
+           (*iterator)->print_new_optims();
+           (*iterator)->print_ast();
+           (*iterator)->print_isl_states();
             std::cout << "\n<illegal>\n";
             delete (*iterator);
             iterator = children.erase(iterator);

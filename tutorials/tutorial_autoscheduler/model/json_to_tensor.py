@@ -13,7 +13,7 @@ class LoopsDepthException(Exception):
     pass
 def get_representation_template(program_json, max_depth):
     max_accesses = 15
-    min_accesses = 1
+    min_accesses = 0
 #     max_depth = 5 
     
     comps_repr_templates_list = []

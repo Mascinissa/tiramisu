@@ -1350,7 +1350,7 @@ void tiramisu::computation::unroll(int L0, int v)
 {
     DEBUG_FCT_NAME(3);
     DEBUG_INDENT(4);
-    
+    std::cout<<"unrolling computation: "<<this->name<<" on loop: "<<L0<<" with a factor of: "<<v<<std::endl;
     bool split_happened = this->separateAndSplit(L0, v);
 
     if (split_happened)
@@ -4740,6 +4740,7 @@ bool computation::unrolling_is_legal(var l)
 
     DEBUG(3, tiramisu::str_dump(" target dim number is : "+std::to_string(target_dim)));
 
+ 
     DEBUG(3, tiramisu::str_dump(" the time set is : "+std::string(isl_set_to_str(time_set))));
 
     unsigned int n_dim = isl_set_n_dim(time_set);
@@ -4792,9 +4793,7 @@ bool computation::unrolling_is_legal(var l)
     isl_set * normal_set = isl_set_apply(reversed_set,normal_schedule) ;
 
     DEBUG(10, tiramisu::str_dump(" dimension number is : "+std::to_string(dimension_index)));
-
     DEBUG(3, tiramisu::str_dump(" set with applied constraints : "+std::string(isl_set_to_str(normal_set) )));
-    
     isl_pw_aff * max = isl_set_dim_max(isl_set_copy(normal_set),dimension_index) ;
     isl_pw_aff * min = isl_set_dim_min(isl_set_copy(normal_set),dimension_index) ;
 
@@ -5838,7 +5837,7 @@ int computation::compute_maximal_AST_depth()
  * - During the traversal, assert that the loop is fully nested.
  *
  */
-tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper)
+tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper, bool contains_static_dims)
 {
     DEBUG_FCT_NAME(10);
     DEBUG_INDENT(4);
@@ -5911,7 +5910,99 @@ tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper)
 
     return e;
 }
+int utility::get_single_iterator_bound(isl_set *set, int dim)
+{
+    isl_basic_set_list *bset_list = isl_set_get_basic_set_list(set);
 
+    int n_basic_set = isl_set_n_basic_set(set);
+
+    for (int i = 0; i < n_basic_set; i++)
+    {
+        isl_basic_set *bset = isl_basic_set_list_get_basic_set(bset_list, i);
+        isl_constraint_list *cst_list = isl_basic_set_get_constraint_list(bset);
+
+        for (int j = 0; j < isl_constraint_list_n_constraint(cst_list); j++)
+        {
+            isl_constraint *cst = isl_constraint_list_get_constraint(cst_list, j);
+            if (strcmp(isl_val_to_str(isl_constraint_get_coefficient_val(cst, isl_dim_out, dim)), "0") != 0)
+            {
+                return (-1 * std::stoi(isl_val_to_str(isl_constraint_get_constant_val(cst))));
+            }
+        }
+    }
+    return -1;
+}
+std::unordered_map<std::string, bool> utility::get_constraints_map(isl_set *set)
+{
+
+    // isl set -> isl map -> isl map get constraints list
+
+    std::unordered_map<std::string, bool> constraints_map{};
+    std::unordered_map<std::string, int> temp_constraints_map{};
+
+    std::string dim_name = "";
+
+    for (int k = 0; k < isl_set_dim(set, isl_dim_out); k++)
+    {
+        if (isl_set_get_dim_name(set, isl_dim_out, k) != NULL)
+        {
+            dim_name = isl_set_get_dim_name(set, isl_dim_out, k);
+            temp_constraints_map.insert({dim_name, 0});
+        }
+        else
+        {
+            continue;
+        }
+    }
+
+    isl_basic_set_list *bset_list = isl_set_get_basic_set_list(set);
+
+    int n_basic_set = isl_set_n_basic_set(set);
+
+    for (int i = 0; i < n_basic_set; i++)
+    {
+        isl_basic_set *bset = isl_basic_set_list_get_basic_set(bset_list, i);
+        isl_constraint_list *cst_list = isl_basic_set_get_constraint_list(bset);
+
+        for (int j = 0; j < isl_constraint_list_n_constraint(cst_list); j++)
+        {
+            isl_constraint *cst = isl_constraint_list_get_constraint(cst_list, j);
+            for (int k = 0; k < isl_set_dim(set, isl_dim_out); k++)
+            {
+            // get coefficient of the the dim in this constraint
+            // if coefficient is 0
+            std::string dim_name = "";
+            if (isl_set_get_dim_name(set, isl_dim_out, k) != NULL)
+            {
+                dim_name = isl_set_get_dim_name(set, isl_dim_out, k);
+            }
+            else
+            {
+                continue;
+            }
+            if (strcmp(isl_val_to_str(isl_constraint_get_coefficient_val(cst, isl_dim_out, k)), "0") != 0)
+            {
+                temp_constraints_map.at(dim_name) = temp_constraints_map[dim_name] + 1;
+            }
+            }
+        }
+    }
+
+    for (auto constraint_element : temp_constraints_map)
+    {
+        if (constraint_element.second > 1)
+        {
+            constraints_map.insert({constraint_element.first, true});
+        }
+        else
+        {
+            constraints_map.insert({constraint_element.first, false});
+        }
+    }
+
+    return constraints_map;
+}
+    
 bool computation::separateAndSplit(tiramisu::var L0, int sizeX)
 {
     DEBUG_FCT_NAME(3);

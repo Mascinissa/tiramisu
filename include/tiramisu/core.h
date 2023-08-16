@@ -5350,12 +5350,24 @@ public:
      * the upper bound and false to extract the lower bound.
      */
      static expr extract_bound_expression(isl_ast_node *ast, int dim, bool upper);
-
+     /**
+      * Returns a map with the dimensions of the set and the values:
+      * True: if the dimension has at least two constraints in the constraints map
+      * False otherwise
+      */
+     static std::unordered_map<std::string, bool> get_constraints_map(isl_set *set);
+     /**
+      * Return single iterator bound
+      *
+      */
+     static int get_single_iterator_bound(isl_set *set, int dim);
+     
     /**
      * Return a tiramisu::expr representing the bound of
      * the dimension \p dim in \p set.  If \p upper is true
      * then this function returns the upper bound otherwise
      * it returns the lower bound.
+     * \p contains_static_dims is used to indicate if \p set contains static dimensions
      *
      * For example, assuming that
      *
@@ -5371,7 +5383,7 @@ public:
      *
      * would return min(N-1,M-1)
      */
-    static tiramisu::expr get_bound(isl_set *set, int dim, int upper);
+    static tiramisu::expr get_bound(isl_set *set, int dim, int upper, bool contains_static_dims = false);
 
     /**
      * Return the extent of the loop.

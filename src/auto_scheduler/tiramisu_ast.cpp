@@ -185,7 +185,6 @@ ast_node::ast_node(tiramisu::computation *comp, syntax_tree *ast)
     this->name = isl_set_get_dim_name(iter_domain, isl_dim_set, 0);
     this->low_bound = utility::get_bound(iter_domain, 0, false).get_int_val();
     this->up_bound = utility::get_bound(iter_domain, 0, true).get_int_val();
-
     nodes.push_back(this);
         
     // Create the other nodes, one for each iterator
@@ -197,7 +196,6 @@ ast_node::ast_node(tiramisu::computation *comp, syntax_tree *ast)
         node->name = isl_set_get_dim_name(iter_domain, isl_dim_set, i);
         node->low_bound = utility::get_bound(iter_domain, i, false).get_int_val();
         node->up_bound = utility::get_bound(iter_domain, i, true).get_int_val();
-        
         nodes.push_back(node);
     }
 

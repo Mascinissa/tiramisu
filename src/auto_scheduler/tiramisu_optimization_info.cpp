@@ -20,10 +20,10 @@ void unroll_innermost_levels(std::vector<tiramisu::computation*> const& comps_li
         innermost_indices.push_back(comp->get_loop_levels_number() - 1);
                 
     // Apply unrolling to innermost loop levels.
-    for (int i = 0; i < innermost_indices.size(); ++i)
+    for (int i = 0; i < innermost_indices.size(); ++i){
         comps_list[i]->unroll(innermost_indices[i], unroll_fact);
+    }
 }
-
 void apply_optimizations(syntax_tree const& ast)
 {
     // Check ast.h for the difference between ast.previous_optims and ast.new_optims

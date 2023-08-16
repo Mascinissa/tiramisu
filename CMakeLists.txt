@@ -180,7 +180,7 @@ if (${USE_MPI})
     link_directories(${MPI_BUILD_DIR}/lib)
     include_directories(${MPI_BUILD_DIR}/include)
 else ()
-    set(CMAKE_CXX_COMPILER "g++-7")
+    set(CMAKE_CXX_COMPILER "g++")
 endif()
 
 
