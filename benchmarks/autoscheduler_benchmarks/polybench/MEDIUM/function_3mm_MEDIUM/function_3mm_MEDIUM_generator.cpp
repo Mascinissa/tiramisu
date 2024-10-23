@@ -22,20 +22,21 @@ int main(int argc, char **argv)
     input B("B", {k, l}, p_float64);
     input C("C", {l, j}, p_float64);
     input D("D", {j, m}, p_float64);
+    
+    input AB_inp("AB_inp", {i, l}, p_float64);
+    input CD_inp("CD_inp", {l, m}, p_float64);
+    input E_inp("E_inp", {i,m}, p_float64);
 
 
     //Computations
     computation AB_init("AB_init", {i,l}, 0.0);
-    computation AB("AB", {i,l,k}, p_float64);
-    AB.set_expression(AB(i,l,k) + A(i,k)*B(k,l));
+    computation AB("AB", {i,l,k}, AB_inp(i,l) + A(i,k)*B(k,l));
 
     computation CD_init("CD_init", {l,m}, 0.0);
-    computation CD("CD", {l,m,j}, p_float64);
-    CD.set_expression(CD(l,m,j) + C(l,j)*D(j,m));
+    computation CD("CD", {l,m,j}, CD_inp(l,m) + C(l,j)*D(j,m));
 
     computation E_init("E_init", {i,m}, 0.0);
-    computation E("E", {i,m,l}, p_float64);
-    E.set_expression(E(i,m,l) + AB(i,l,0)*CD(l,m,0));
+    computation E("E", {i,m,l}, E_inp(i,m) + AB_inp(i,l)*CD_inp(l,m));
     
     // -------------------------------------------------------
     // Layer II
@@ -64,7 +65,10 @@ int main(int argc, char **argv)
     B.store_in(&b_B);
     C.store_in(&b_C);
     D.store_in(&b_D);
-    
+    AB_inp.store_in(&b_AB);
+    CD_inp.store_in(&b_CD);
+    E_inp.store_in(&b_E);
+        
 
     //Store computations
     AB_init.store_in(&b_AB);
