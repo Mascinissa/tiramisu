@@ -24,17 +24,17 @@ using namespace std;
 int main(int, char **argv)
 {
 
-	double *b_A = (double*)malloc(100*1200*sizeof(double));
-	parallel_init_buffer(b_A,100*1200, (double)19);
-	Halide::Buffer<double> buf01(b_A, 100, 1200);
+	double *b_A = (double*)malloc(1000*1200*sizeof(double));
+	parallel_init_buffer(b_A,1000*1200, (double)19);
+	Halide::Buffer<double> buf01(b_A, 1000, 1200);
 
 	double *b_B = (double*)malloc(1200*1100* sizeof(double));
 	parallel_init_buffer(b_B, 1200*1100, (double)36);
 	Halide::Buffer<double> buf02(b_B, 1200, 1100);
 
-	double *b_C = (double*)malloc(100*1100* sizeof(double));
-	parallel_init_buffer(b_C, 100*1100, (double)36);
-	Halide::Buffer<double> buf03(b_C, 100, 1100);
+	double *b_C = (double*)malloc(1000*1100* sizeof(double));
+	parallel_init_buffer(b_C, 1000*1100, (double)36);
+	Halide::Buffer<double> buf03(b_C, 1000, 1100);
 
 	halide_set_custom_do_par_for(&omp_do_par_for);
 	int nb_exec = get_nb_exec();
