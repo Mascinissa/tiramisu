@@ -18,7 +18,7 @@ int main(int argc, char **argv)
     tiramisu::init("function_gemm_LARGE");
 
     //Iteration variables    
-    var i("i", 0, 100), j("j", 0, 1100), k("k", 0, 1200);
+    var i("i", 0, 1000), j("j", 0, 1100), k("k", 0, 1200);
     
 
     //inputs
@@ -42,9 +42,9 @@ int main(int argc, char **argv)
     // Layer III
     // -------------------------------------------------------
     //Input Buffers
-    buffer b_A("b_A", {100,1200}, p_float64, a_input);
+    buffer b_A("b_A", {1000,1200}, p_float64, a_input);
     buffer b_B("b_B", {1200,1100}, p_float64, a_input);
-    buffer b_C("b_C", {100,1100}, p_float64, a_output);
+    buffer b_C("b_C", {1000,1100}, p_float64, a_output);
      
     
 
