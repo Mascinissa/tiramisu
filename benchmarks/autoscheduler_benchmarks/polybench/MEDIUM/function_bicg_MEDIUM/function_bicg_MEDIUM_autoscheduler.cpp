@@ -27,14 +27,16 @@ int main(int argc, char **argv)
   input A("A", {i, j}, p_float64);
   input p("p", {i}, p_float64);
   input r("r", {j}, p_float64);
+  input s_inp("s_inp", {j}, p_float64);
+  input q_inp("q_inp", {i}, p_float64);
 
   // Computations
   computation q_init("q_init", {i}, 0.0);
   computation q("q", {i, j}, p_float64);
-  q.set_expression(q(i, j) + A(i, j) * p(j));
+  q.set_expression(q_inp(i) + A(i, j) * p(j));
   computation s_init("s_init", {j}, 0.0);
   computation s("s", {i, j}, p_float64);
-  s.set_expression(s(i, j) + A(i, j) * r(i));
+  s.set_expression(s_inp(j) + A(i, j) * r(i));
 
   // -------------------------------------------------------
   // Layer II
@@ -57,8 +59,8 @@ int main(int argc, char **argv)
   A.store_in(&b_A);
   p.store_in(&b_p);
   r.store_in(&b_r);
-  q.store_in(&b_q);
-  s.store_in(&b_s);
+  q_inp.store_in(&b_q);
+  s_inp.store_in(&b_s);
 
   // Store computations
   q_init.store_in(&b_q);
