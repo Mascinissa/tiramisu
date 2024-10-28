@@ -19,14 +19,16 @@ int main(int argc, char **argv) {
         // inputs
         input A("A", {i, j}, p_float64);
         input x("x", {j}, p_float64);
+        input Ax_inp("Ax_inp", {i}, p_float64);
+        input y_inp("y_inp", {j}, p_float64);
 
         // Computations
         computation Ax_init("Ax_init", {i}, 0.0);
         computation Ax("Ax", {i, j}, p_float64);
-        Ax.set_expression(Ax(i, j) + A(i, j) * x(j));
+        Ax.set_expression(Ax_inp(i) + A(i, j) * x(j));
         computation y_init("y_init", {j}, 0.0);
         computation y("y", {i, j}, p_float64);
-        y.set_expression(y(i, j) + A(i, j) * Ax(i, 0));
+        y.set_expression(y_inp(j) + A(i, j) * Ax_inp(i));
 
         // -------------------------------------------------------
         // Layer II
@@ -46,7 +48,9 @@ int main(int argc, char **argv) {
 
         // Store inputs
         A.store_in(&b_A);
+        Ax_inp.store_in(&b_Ax);
         x.store_in(&b_x);
+        y_inp.store_in(&b_y);
 
         // Store computations
         Ax_init.store_in(&b_Ax);
