@@ -22,9 +22,9 @@ mkdir build ; cd build
 cmake .. -DBUILD_TARGET="generator"  -DFUNCTION_TO_BUILD=$1
 make
 ../generator
-g++ -shared -o function.o.so $1.o
+g++ -shared -o $1.o.so $1.o
 # Generate a wrapper
-g++ -std=c++17 -fno-rtti -I${TIRAMISU_ROOT}/include -DTIRAMISU_MINI -I${TIRAMISU_ROOT}/3rdParty/Halide/install/include/ -I${TIRAMISU_ROOT}/3rdParty/isl/include/ -I${TIRAMISU_ROOT}/benchmarks -L${TIRAMISU_ROOT}/build -L${TIRAMISU_ROOT}/3rdParty/Halide/install/lib64/ -L${TIRAMISU_ROOT}/3rdParty/isl/build/lib -o $1_wrapper -ltiramisu -lHalide -ldl -lpthread -fopenmp -lz -lm -Wl,-rpath,${TIRAMISU_ROOT}/build ../$1_wrapper.cpp ./function.o.so -ltiramisu -lHalide -ldl -lpthread -fopenmp -lz -lm
+g++ -std=c++17 -fno-rtti -I${TIRAMISU_ROOT}/include -I${TIRAMISU_ROOT}/3rdParty/Halide/install/include/ -I${TIRAMISU_ROOT}/3rdParty/isl/include/ -I${TIRAMISU_ROOT}/benchmarks -L${TIRAMISU_ROOT}/build -L${TIRAMISU_ROOT}/3rdParty/Halide/install/lib64/ -L${TIRAMISU_ROOT}/3rdParty/isl/build/lib -o $1_wrapper -ltiramisu -lHalide -ldl -lpthread -fopenmp -lz -lm -Wl,-rpath,${TIRAMISU_ROOT}/build ../$1_wrapper.cpp ./$1.o.so -ltiramisu -lHalide -ldl -lpthread -fopenmp -lz -lm
 
 cmake .. -DBUILD_TARGET="autoscheduler"  -DFUNCTION_TO_BUILD=$1
 make
