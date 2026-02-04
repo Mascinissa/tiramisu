@@ -492,9 +492,7 @@ isl_constraint *generator::get_constraint_for_access(int access_dimension,
             tiramisu::expr op0 = access_expression.get_operand(0);
             tiramisu::expr op1 = access_expression.get_operand(1);
             cst = generator::get_constraint_for_access(access_dimension, op0, access_relation, cst, coeff, fct);
-            isl_constraint_dump(cst);
             cst = generator::get_constraint_for_access(access_dimension, op1, access_relation, cst, coeff, fct);
-            isl_constraint_dump(cst);
         }
         else if (access_expression.get_op_type() == tiramisu::o_sub)
         {
