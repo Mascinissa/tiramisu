@@ -696,7 +696,8 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree & ast)
     else
         sched_json += "null, ";
 
-    sched_json += "\"sched_str\": \"" + ast.get_schedule_str() + "\", ";
+    sched_json += "\"legacy_schedule_str\": \"" + ast.get_schedule_str() + "\", ";
+    sched_json += "\"tiralib_schedule_str\": \"" + ast.get_tiralib_schedule_str() + "\", ";
 
     // Write the structure of the tree
     sched_json += "\"tree_structure\": {";

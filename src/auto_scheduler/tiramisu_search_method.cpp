@@ -253,6 +253,7 @@ std::vector<syntax_tree*> beam_search::search_save_matrix(syntax_tree& ast, std:
                 
                 if (std::atoi(read_env_var("AS_VERBOSE"))==1){
                     std::cout << "Schedule number "<< schedules_annotations->size() << std::endl;
+                    std::cout << "Tiralib schedule string "<< (*iterator)->get_tiralib_schedule_str() << std::endl;
                     std::cout << "Evaluation : " << child->evaluation << std::endl;
                     std::cout << "Number of measurements : " << measurements.size() << std::endl;
                     std::cout << "===================================" << std::endl << std::endl;
@@ -401,6 +402,7 @@ std::vector<syntax_tree*> beam_search::search_save(syntax_tree& ast, std::vector
             schedules_annotations->push_back(schedule_annot);
 
             std::cout << "Schedule number "<< schedules_annotations->size() << std::endl;
+            std::cout << "Tiralib schedule string "<< (*iterator)->get_tiralib_schedule_str() << std::endl;
             std::cout << "Evaluation : " << (*iterator)->evaluation << std::endl;
             std::cout << "Number of measurements : " << measurements.size() << std::endl;
             std::cout << "===================================" << std::endl << std::endl;

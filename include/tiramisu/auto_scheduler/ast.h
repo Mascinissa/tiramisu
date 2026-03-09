@@ -892,6 +892,11 @@ public:
     std::string get_schedule_str();
 
     /**
+     * Encodes the transformations applied to the ast as a string in the TiraLib format
+     */
+    std::string get_tiralib_schedule_str();
+
+    /**
      * Predicts if the schedule applied to the ast surpasses the max number of affine transformations set by the user
      */
     bool ast_is_prunable();

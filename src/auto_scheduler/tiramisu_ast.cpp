@@ -2678,6 +2678,98 @@ std::string syntax_tree::get_schedule_str()
     return schedule_str;
 }
 
+std::string syntax_tree::get_tiralib_schedule_str()
+{
+    std::vector<optimization_info> schedule_vect = this->get_schedule();
+    std::string schedule_str;
+    // bool transformed_by_matrix = false;
+    // int start_matrices = -1;
+    // int first_matrix = true;
+    if(schedule_vect.size()<1) return schedule_str;
+    // std::vector<std::vector<std::vector<int>>> matrices(this->get_computations().size());
+    // std::vector<int> first_time(this->get_computations().size());
+    
+    // for(int i=0;i<first_time.size();i++) first_time.at(i)=1;
+    for (auto optim: schedule_vect)
+    {
+        std::string comps_list_str="comps=[";
+        
+        for (auto comp: optim.comps)
+        {
+            comps_list_str+= "'"+comp->get_name()+"'"+",";    
+        }
+        comps_list_str.pop_back(); //remove the last comma
+        comps_list_str+="]";
+
+        switch(optim.type) {
+            case optimization_type::FUSION:
+                schedule_str += "F(L"+std::to_string(optim.l0)+","+comps_list_str+")|";
+                break;
+            
+            case optimization_type::MATRIX:
+                if (optim.unimodular_transformation_type == 1) // Interchange
+                    schedule_str += "I(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+comps_list_str+")|";
+                else if (optim.unimodular_transformation_type == 2) //Reversal
+                    schedule_str += "R(L"+std::to_string(optim.l0)+","+comps_list_str+")|";
+                else if(optim.unimodular_transformation_type == 3) //skewing
+                    if (optim.l1_fact!=0)
+                        schedule_str += "S(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+
+                                std::to_string(optim.l0_fact)+","+std::to_string(optim.l1_fact)+","+comps_list_str+")|";
+                    else // sometinmes 2nd skew factor ==0 and violates an assert in tiramiu (IDK why this 2nd fact is set like that). I noticed that in those cases the actual skew factors are l2_fact and l3_fact elements
+                        schedule_str += "S(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+
+                                std::to_string(optim.l2_fact)+","+std::to_string(optim.l3_fact)+","+comps_list_str+")|";
+                else if(optim.unimodular_transformation_type == 0)
+                    {/* nothing to do*/}
+                else{
+                    std::cerr << "Error: Uknown matrix transformation" << optim.unimodular_transformation_type << std::endl;
+                    exit(1); 
+                }
+                break;
+
+            case optimization_type::SHIFTING:
+                // Not supported bu tiralib
+                // schedule_str += "Sh("+comps_list_str+",L"+std::to_string(optim.l0)+","+std::to_string(optim.l0_fact)+")"; //
+                break;
+
+            // case optimization_type::INTERCHANGE:
+            //     schedule_str += "I("+comps_list_str+",L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+")";
+            //     break;
+
+            case optimization_type::TILING:
+                if (optim.nb_l == 2)
+                    schedule_str += "T2(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+
+                            std::to_string(optim.l0_fact)+","+std::to_string(optim.l1_fact)+","+comps_list_str+")|";
+                else if (optim.nb_l == 3)
+                    schedule_str += "T3(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+",L"+std::to_string(optim.l2)+"," +
+                            std::to_string(optim.l0_fact)+","+std::to_string(optim.l1_fact)+","+std::to_string(optim.l2_fact)+"," +comps_list_str+")|";
+                break;
+
+            case optimization_type::UNROLLING:
+                schedule_str += "U(L"+std::to_string(optim.l0)+","+std::to_string(optim.l0_fact)+","+comps_list_str+")|";
+                break;
+
+            case optimization_type::PARALLELIZE:
+                schedule_str += "P(L"+std::to_string(optim.l0)+","+comps_list_str+")|";
+                break;
+
+            // case optimization_type::SKEWING:
+            //     schedule_str += "S("+comps_list_str+",L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+
+            //                     std::to_string(optim.l0_fact)+","+std::to_string(optim.l1_fact)+")";
+            //     break;
+
+            default:
+                std::cerr << "Error: Uknown transformation type" << static_cast<int>(optim.type) << std::endl;
+                exit(1); 
+                break;
+        }
+       
+    
+              
+    }
+    schedule_str.pop_back(); // remove the last pipe |
+    return schedule_str;
+}
+
 bool syntax_tree::ast_is_prunable()
 {
     std::vector<int> optims(this->get_computations().size());
