@@ -114,28 +114,43 @@ void auto_scheduler::sample_search_space(std::string filename, bool timeout_sche
     std::cout << "Search time : " << search_time << " ms" << std::endl;
     std::cout << "Best evaluation : " << best_execution_time << std::endl;
 
-    if(std::atoi(read_env_var("SAVE_BEST_SCHED_IN_FILE"))==1){
-        syntax_tree* best_ast = searcher->get_best_ast();
-        std::ofstream myfile;
+    // The best schedule found during the search. Non-null whenever at least one
+    // candidate was evaluated (always, in practice); guarded here regardless.
+    syntax_tree* best_ast = searcher->get_best_ast();
 
-        myfile.open(read_env_var("LOG_FILE_PATH"), std::ios_base::app);
-        myfile<<"\""<<filename.substr(2,filename.size()-26)<<"\",";
-        myfile << "\""<< initial_exec_time<<"\",";
-        
-        if (std::atoi(read_env_var("EXPLORE_BY_EXECUTION"))==0 && std::atoi(read_env_var("EXECUTE_BEST_SCHED"))==1)
-        {
-            best_execution_time = min_eval(exec_evaluator->get_measurements(*best_ast, false, 0));
-            std::cout << "Best execution time : " << best_execution_time << std::endl;
-        }
+    // EXECUTE_BEST_SCHED: in model-guided mode the winner was only predicted, not
+    // run, so (if requested) measure it on the real machine to report a true time.
+    // In execution-guided mode its time is already known from the search.
+    if (best_ast != nullptr &&
+        std::atoi(read_env_var("EXPLORE_BY_EXECUTION"))==0 &&
+        std::atoi(read_env_var("EXECUTE_BEST_SCHED"))==1)
+    {
+        best_execution_time = min_eval(exec_evaluator->get_measurements(*best_ast, false, 0));
+        std::cout << "Best execution time : " << best_execution_time << std::endl;
+    }
 
-        myfile << "\""<<best_execution_time<<"\",";
-        myfile << "\"" << best_ast->get_schedule_str() <<"\""<< std::endl;
-        myfile.close();
-
+    // Always record the best schedule in the output JSON: it is already in hand,
+    // and consumers expect it independently of the CSV log below.
+    if (best_ast != nullptr)
+    {
         output_json += ",\n";
         output_json += "\"best_schedule\":{";
         output_json += "\"actual_exec_time\": " + std::to_string(best_execution_time)+ ", ";
         output_json += "\"sched_str\": \"" + best_ast->get_schedule_str() + "\"}";
+    }
+
+    // SAVE_BEST_SCHED_IN_FILE: additionally append a one-line CSV summary to
+    // LOG_FILE_PATH. This is now purely about the CSV log — nothing else depends
+    // on it.
+    if (best_ast != nullptr && std::atoi(read_env_var("SAVE_BEST_SCHED_IN_FILE"))==1)
+    {
+        std::ofstream myfile;
+        myfile.open(read_env_var("LOG_FILE_PATH"), std::ios_base::app);
+        myfile<<"\""<<filename.substr(2,filename.size()-26)<<"\",";
+        myfile << "\""<< initial_exec_time<<"\",";
+        myfile << "\""<<best_execution_time<<"\",";
+        myfile << "\"" << best_ast->get_schedule_str() <<"\""<< std::endl;
+        myfile.close();
     }
 
     output_json += " \n}\n";
