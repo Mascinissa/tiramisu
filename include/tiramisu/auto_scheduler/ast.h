@@ -662,7 +662,7 @@ public:
 
     /**
      * a structure that saves the points of previous applied optimizations.
-     * Used by the shedule_generator to explore same optimization in different depth of the search.
+     * Used by the shedule_generator to explore same optimization in different deapth of the search.
     */
     generator_state search_state;
 
@@ -890,6 +890,11 @@ public:
      * sampling schedules
      */
     std::string get_schedule_str();
+
+    /**
+     * Encodes the transformations applied to the ast as a string in the TiraLib format
+     */
+    std::string get_tiralib_schedule_str();
 
     /**
      * Predicts if the schedule applied to the ast surpasses the max number of affine transformations set by the user

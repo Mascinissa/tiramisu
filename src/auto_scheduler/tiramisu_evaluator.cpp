@@ -25,14 +25,16 @@ evaluate_by_execution::evaluate_by_execution(std::vector<tiramisu::buffer*> cons
     fct->set_arguments(arguments);
     for (auto const& buf : arguments)
     {
+        // Newer Halide (14) requires an explicit ArgumentEstimates; the LOOPer
+        // branch built against an older Halide whose constructor lacked it.
         Halide::Argument buffer_arg(
-            buf->get_name(),
-            halide_argtype_from_tiramisu_argtype(buf->get_argument_type()),
-            halide_type_from_tiramisu_type(buf->get_elements_type()),
-            buf->get_n_dims(),
-            Halide::ArgumentEstimates{});
+                buf->get_name(),
+                halide_argtype_from_tiramisu_argtype(buf->get_argument_type()),
+                halide_type_from_tiramisu_type(buf->get_elements_type()),
+                buf->get_n_dims(),
+                Halide::ArgumentEstimates{});
 
-        halide_arguments.push_back(buffer_arg);
+       halide_arguments.push_back(buffer_arg);
     }
 }
 //TODO remove this function and change the whole structure of the evaluator classes
@@ -56,12 +58,9 @@ float evaluate_by_execution::evaluate(syntax_tree& ast)
                                              Halide::LinkageType::External,
                                              fct->get_halide_stmt());
                                              
-    // m.compile(Halide::Outputs().object(obj_filename));
-    std::map<Halide::OutputFileType, std::string> omap = {
-        {Halide::OutputFileType::object, obj_filename}
-    };
-
-    m.compile(omap);
+    // Newer Halide (14) replaced Halide::Outputs() with an OutputFileType map.
+    m.compile(std::map<Halide::OutputFileType, std::string>{
+        {Halide::OutputFileType::object, obj_filename}});
 
     std::string gpp_command = read_env_var("GXX");
 
@@ -103,12 +102,9 @@ std::vector<float> evaluate_by_execution::get_measurements(syntax_tree& ast, boo
                                              Halide::LinkageType::External,
                                              fct->get_halide_stmt());
 
-    // m.compile(Halide::Outputs().object(obj_filename));
-    std::map<Halide::OutputFileType, std::string> omap = {
-        {Halide::OutputFileType::object, obj_filename}
-    };
-
-    m.compile(omap);
+    // Newer Halide (14) replaced Halide::Outputs() with an OutputFileType map.
+    m.compile(std::map<Halide::OutputFileType, std::string>{
+        {Halide::OutputFileType::object, obj_filename}});
 
     std::string gpp_command = read_env_var("GXX");
 
@@ -707,7 +703,8 @@ std::string evaluate_by_learning_model::get_schedule_json(syntax_tree & ast)
     else
         sched_json += "null, ";
 
-    sched_json += "\"sched_str\": \"" + ast.get_schedule_str() + "\", ";
+    sched_json += "\"legacy_schedule_str\": \"" + ast.get_schedule_str() + "\", ";
+    sched_json += "\"tiralib_schedule_str\": \"" + ast.get_tiralib_schedule_str() + "\", ";
 
     // Write the structure of the tree
     sched_json += "\"tree_structure\": {";

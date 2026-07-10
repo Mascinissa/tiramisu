@@ -17,7 +17,6 @@ enum optimization_type
     UNROLLING,
     PARALLELIZE,
     SKEWING,
-    SKEWING_POSITIVE, // a specialisation of SKEWING optimization,
     MATRIX,
     VECTORIZATION,
     SHIFTING

@@ -64,7 +64,6 @@ void dnn_access_matrix::print_access_matrix() const
     std::cout<<"\n";
 }
 
-
 std::string dnn_access_matrix::acces_matrix_to_string()
 {
     std::string str = "[";
@@ -90,7 +89,7 @@ std::string dnn_access_matrix::acces_matrix_to_string()
 }
 
 
-void dnn_access_matrix::transform_matrix_by_skewing(int first_node_depth,int alpha,int beta,int gamma,int sigma)
+void dnn_access_matrix::transforme_matrix_by_skewing(int first_node_depth,int alpha,int beta,int gamma,int sigma)
 {
     
 
@@ -303,7 +302,7 @@ void dnn_accesses::modify_accesses_by_skewing(int first_node_depth,int alpha,int
 
     for(auto& access:this->accesses_list)
     {
-        access.transform_matrix_by_skewing(first_node_depth,alpha,beta,gamma,sigma);
+        access.transforme_matrix_by_skewing(first_node_depth,alpha,beta,gamma,sigma);
     }
 }
 
