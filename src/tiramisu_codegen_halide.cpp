@@ -2146,7 +2146,7 @@ tiramisu::generator::halide_stmt_from_isl_node(const tiramisu::function &fct, is
 
                         // Currently we assume that when vectorization is used,
                         // then the original loop extent is > vector_length.
-                        cond_upper_bound_halide_format = Halide::Expr(vector_length);
+                        cond_upper_bound_halide_format = simplify(init_expr + Halide::Expr(vector_length)); // fix: same as unroll, correct extent for non-zero-min loops
                         fortype = Halide::Internal::ForType::Vectorized;
                         DEBUG(3, tiramisu::str_dump("Loop vectorized"));
 
@@ -2229,7 +2229,7 @@ tiramisu::generator::halide_stmt_from_isl_node(const tiramisu::function &fct, is
 			// always). If the user provided a factor, we use it.
 			if (unrolling_factor != 0)
 			{
-			    cond_upper_bound_halide_format = Halide::Expr(unrolling_factor);
+			    cond_upper_bound_halide_format = simplify(init_expr + Halide::Expr(unrolling_factor)); // fix: extent=upper-init, so upper must be init+factor for non-zero-min (reversed/shifted) loops
 			    fortype = Halide::Internal::ForType::Unrolled;
 			    DEBUG(3, tiramisu::str_dump("Loop unrolled"));
 			}
