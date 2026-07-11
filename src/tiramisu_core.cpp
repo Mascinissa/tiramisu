@@ -6555,11 +6555,21 @@ tiramisu::expr utility::extract_bound_expression(isl_ast_node *node, int dim, bo
             isl_ast_node_free(body);
         }
 
-        assert(result.is_defined());
+        // Note: result may legitimately be undefined here if an inner loop level
+        // was eliminated by isl because its dimension is single-valued. In that
+        // case the undefined result propagates up to utility::get_bound, which
+        // recovers the bound directly from the iteration set.
     }
     else if (isl_ast_node_get_type(node) == isl_ast_node_user)
     {
-        ERROR("Cannot extract bounds from a isl_ast_user node.", true);
+        // Reaching a user (statement) node while a loop level is still expected
+        // means isl eliminated the loop for that level because the dimension is
+        // single-valued (e.g. a dimension constrained by an equality such as
+        // j = 1 - i). We cannot extract the bound from the AST in this case, so
+        // we leave the result undefined and let the caller (utility::get_bound)
+        // recover the bound directly from the iteration set.
+        DEBUG(3, tiramisu::str_dump("Reached a user node while a loop was expected "
+                                    "(single-valued dimension); bound to be recovered from the set."));
     }
     else if (isl_ast_node_get_type(node) == isl_ast_node_if)
     {
@@ -6722,6 +6732,23 @@ tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper)
 
     isl_ast_node *node = isl_ast_build_node_from_schedule_map(ast_build, isl_union_map_from_map(map));
     e = utility::extract_bound_expression(node, dim, upper);
+
+    // If the AST-based extraction could not find a loop for the requested
+    // dimension, it is because isl eliminated that loop: the dimension is
+    // single-valued (constrained by an equality such as j = 1 - i). Recover the
+    // bound directly from the set as an affine expression of the outer
+    // iterators. For a single-valued dimension the lower and upper bounds are
+    // identical.
+    if (!e.is_defined())
+    {
+        DEBUG(3, tiramisu::str_dump("Recovering the bound of a single-valued dimension from the set."));
+        isl_pw_aff *bound_pw = upper ? isl_set_dim_max(isl_set_copy(set), dim)
+                                     : isl_set_dim_min(isl_set_copy(set), dim);
+        isl_ast_expr *bound_expr = isl_ast_build_expr_from_pw_aff(ast_build, bound_pw);
+        e = tiramisu_expr_from_isl_ast_expr(bound_expr);
+        isl_ast_expr_free(bound_expr);
+    }
+
     isl_ast_build_free(ast_build);
 
     assert(e.is_defined() && "The computed bound expression is undefined.");
