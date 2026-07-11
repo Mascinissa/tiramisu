@@ -875,6 +875,29 @@ void function::print_sched_graph(){
 }
 void function::fuse_comps_sched_graph(tiramisu::computation* comp_into, tiramisu::computation* comp_to_fuse, int fusion_level){
 
+    // This routine walks the schedule chain forward from comp_into to locate
+    // comp_to_fuse and the computations between them. That only terminates when
+    // comp_into precedes comp_to_fuse in the chain; if the two are passed in the
+    // opposite order the walk never ends and grows unbounded memory. Normalize
+    // so comp_into is always the earlier computation (fusion is symmetric in the
+    // two computations, only their schedule order matters).
+    if (this->starting_computations.size() == 1)
+    {
+        tiramisu::computation *c = *this->starting_computations.begin();
+        int guard = (int)this->get_computations().size() + 1;
+        while (c != nullptr && guard-- > 0)
+        {
+            if (c == comp_into)
+                break;                                       // comp_into already earlier
+            if (c == comp_to_fuse)
+            {
+                std::swap(comp_into, comp_to_fuse);          // comp_to_fuse precedes comp_into
+                break;
+            }
+            c = c->get_successor();
+        }
+    }
+
     // if the computation to fuse is the successor of the computation to fuse into we don't need to change the order we just change the level of fusion
     if (comp_into->get_successor() == comp_to_fuse)
     {
@@ -901,8 +924,13 @@ void function::fuse_comps_sched_graph(tiramisu::computation* comp_into, tiramisu
             ERROR("Computation to fuse into not found in the schedule graph", 1);
         }
 
-        // push the values to the then_values vector
-        then_values.push_back(std::make_tuple(current_comp, successor_comp, this->sched_graph[comp_into][successor_comp]));
+        // push the values to the then_values vector. Use sched_graph[current_comp]
+        // (the edge being copied), not sched_graph[comp_into]: the latter is the
+        // same key on every iteration and, because unordered_map::operator[]
+        // inserts, its last iteration adds a spurious self-edge
+        // sched_graph[comp_into][comp_into] that get_successor() can later return,
+        // sending the loops below into an infinite loop.
+        then_values.push_back(std::make_tuple(current_comp, successor_comp, this->sched_graph[current_comp][successor_comp]));
         current_comp = successor_comp;
     }
 
@@ -942,7 +970,7 @@ void function::fuse_comps_sched_graph(tiramisu::computation* comp_into, tiramisu
 
     successor_comp = middle_group_first_comp;
     int current_fusion_level = middle_group_fusion_level;
-    // copy until we get to the computation to fuse 
+    // copy until we get to the computation to fuse
     while(successor_comp != comp_to_fuse){
         // push the values to the then_values vector
         then_values.push_back(std::make_tuple(current_comp, successor_comp, current_fusion_level));
