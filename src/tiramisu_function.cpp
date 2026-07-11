@@ -832,6 +832,293 @@ void function::dump_sched_graph_dfs(computation * comp,
     }
 }
 
+// ---- TiraLib/autoscheduler scheduling-graph + isl-AST helpers (ported from merge_attempt) ----
+void function::fuse_comps_after_tiling_dfs(computation * comp, std::vector<tiramisu::computation *> comps, int tiling_level,
+                                    std::unordered_set<computation *> &visited)
+{
+    // Do not visit anything that was already returned
+    if (visited.find(comp) != visited.end())
+        return;
+
+    visited.insert(comp);
+    bool comp_in_comps = std::find(comps.begin(), comps.end(), comp) != comps.end();
+    for (auto &edge: this->sched_graph[comp])
+    {        
+        if(comp_in_comps) {
+            if (std::find(comps.begin(), comps.end(), edge.first) != comps.end()){
+                edge.second += tiling_level;
+            }
+        }
+
+        fuse_comps_after_tiling_dfs(edge.first, comps, tiling_level, visited);
+    }
+}
+void function::fuse_comps_after_tiling(std::vector<tiramisu::computation *> comps, int tiling_level){
+    assert(comps.size() > 1);
+    assert(tiling_level == 2 or tiling_level == 3);
+    // Contains all nodes that have been visited
+    std::unordered_set<computation *> visited;
+    for (auto root : this->starting_computations){
+        fuse_comps_after_tiling_dfs(root, comps, tiling_level, visited);
+    }
+}
+void function::print_sched_graph(){
+    assert(this->starting_computations.size() == 1);
+    tiramisu::computation* current_comp = *this->starting_computations.begin();
+    std::cout << "Schedule graph for function " << this->get_name() << std::endl;
+    tiramisu::computation* successor_comp = current_comp->get_successor();
+    while(successor_comp != nullptr){
+        std::cout << current_comp->get_name() << " -> " << successor_comp->get_name() << " : " << this->sched_graph[current_comp][successor_comp] << std::endl;
+        current_comp = successor_comp;
+        successor_comp = current_comp->get_successor();
+    }
+}
+void function::fuse_comps_sched_graph(tiramisu::computation* comp_into, tiramisu::computation* comp_to_fuse, int fusion_level){
+
+    // if the computation to fuse is the successor of the computation to fuse into we don't need to change the order we just change the level of fusion
+    if (comp_into->get_successor() == comp_to_fuse)
+    {
+        comp_into->then(*comp_to_fuse, fusion_level);
+        return;
+    }
+
+    // vector that holds tuples of the form (comp, comp1, fusion_level) to be used for thens later comp.then(comp1, fusion_level) 
+    std::vector<std::tuple<tiramisu::computation *, tiramisu::computation *, int>> then_values;
+
+    // The scheduling of the computations need to be a single chain containing all computations
+    assert(this->starting_computations.size() == 1);
+    tiramisu::computation* current_comp = *this->starting_computations.begin();
+
+
+
+    // copy the first part of the schedule graph from the starting comp to the comp we are fusing into
+    while (current_comp != comp_into){
+        // get the successor of the current computation
+        auto successor_comp = current_comp->get_successor();
+
+        // if null raise an error we reached the end of the chain without finding the computation to fuse into
+        if(successor_comp == nullptr){
+            ERROR("Computation to fuse into not found in the schedule graph", 1);
+        }
+
+        // push the values to the then_values vector
+        then_values.push_back(std::make_tuple(current_comp, successor_comp, this->sched_graph[comp_into][successor_comp]));
+        current_comp = successor_comp;
+    }
+
+    assert(current_comp == comp_into);
+
+    // 2nd part is to save the middle groups starting point, make the fusion then copy the computations in the same iterator as the computation to fuse
+
+    // save a pointer and fusion level for the start of the groups of computations between the two computations to fuse 
+    tiramisu::computation *middle_group_first_comp = comp_into->get_successor();
+    int middle_group_fusion_level = this->sched_graph[comp_into][middle_group_first_comp];
+
+    // make the fusion
+    then_values.push_back(std::make_tuple(comp_into, comp_to_fuse, fusion_level));
+
+    // copy the part of the schedule graph starting from the computation to fuse until either we reach the end of the chain or we reach a level lower than the level we fused at
+    current_comp = comp_to_fuse;
+    auto successor_comp = current_comp->get_successor();
+    while(successor_comp && this->sched_graph[current_comp][successor_comp] >= fusion_level){
+        // push the values to the then_values vector
+        then_values.push_back(std::make_tuple(current_comp, successor_comp, this->sched_graph[current_comp][successor_comp]));
+        current_comp = successor_comp;
+        successor_comp = current_comp->get_successor();
+    }
+
+    // 3rd part is to save the end groups starting point then copy the middle group after
+
+    // save a pointer and fusion level for the end of the groups of computations (come after the computation to fuse)
+    tiramisu::computation *after_group_first_comp = nullptr;
+    int after_group_fusion_level = -2;
+
+    if (successor_comp != nullptr)
+    {
+        // save a pointer and fusion level for the end of the groups of computations (come after the computation to fuse)
+        after_group_first_comp = successor_comp;
+        after_group_fusion_level = this->sched_graph[current_comp][successor_comp];
+    }
+
+    successor_comp = middle_group_first_comp;
+    int current_fusion_level = middle_group_fusion_level;
+    // copy until we get to the computation to fuse 
+    while(successor_comp != comp_to_fuse){
+        // push the values to the then_values vector
+        then_values.push_back(std::make_tuple(current_comp, successor_comp, current_fusion_level));
+        current_comp = successor_comp;
+        successor_comp = current_comp->get_successor();
+        current_fusion_level = this->sched_graph[current_comp][successor_comp];
+    }
+
+    // 4th part is to copy the computations after the computation to fuse
+
+    if(after_group_first_comp){
+        successor_comp = after_group_first_comp;
+        current_fusion_level = after_group_fusion_level;
+        // copy until we reach the end
+        while(successor_comp != nullptr){
+            // push the values to the then_values vector
+            then_values.push_back(std::make_tuple(current_comp, successor_comp, current_fusion_level));
+            current_comp = successor_comp;
+            successor_comp = current_comp->get_successor();
+            if (successor_comp != nullptr)
+                current_fusion_level = this->sched_graph[current_comp][successor_comp];
+        }
+    }
+    // clear the old schedule graph
+    this->clear_sched_graph();
+    // make the thens
+    for (auto &then_value : then_values)
+    {
+        std::get<0>(then_value)->then(*std::get<1>(then_value), std::get<2>(then_value));
+    }
+}
+std::string function::generate_isl_ast_representation_string(isl_ast_node *node, int level, std::string tree_str)
+{
+    if (node == NULL)
+    {
+        node = this->ast;
+    }
+
+    // check if tree_str is empty
+    if (tree_str.empty())
+    {
+        tree_str = "";
+    }
+
+    if (isl_ast_node_get_type(node) == isl_ast_node_block)
+    {
+        // iterate over the children of the block and construct their representation
+        isl_ast_node_list *list = isl_ast_node_block_get_children(node);
+        for (int i = 0; i < isl_ast_node_list_n_ast_node(list); i++)
+        {
+            isl_ast_node *child = isl_ast_node_list_get_ast_node(list, i);
+            tree_str = generate_isl_ast_representation_string(child, level, tree_str);
+            isl_ast_node_free(child);
+        }
+        isl_ast_node_list_free(list);
+    }
+    else if (isl_ast_node_get_type(node) == isl_ast_node_for)
+    {
+        // construct string of iterator from the isl_ast_node
+        std::string iterator_string_repr = std::to_string(level) + "|iterator|" + std::string(isl_ast_expr_to_C_str(isl_ast_node_for_get_iterator(node))) + "|" + std::string(isl_ast_expr_to_C_str(isl_ast_node_for_get_init(node))) + "|" +
+                                           std::string(isl_ast_expr_to_C_str(isl_ast_node_for_get_cond(node))) + "|" +
+                                           std::string(isl_ast_expr_to_C_str(isl_ast_node_for_get_inc(node)));
+        tree_str = tree_str + iterator_string_repr + "\n";
+
+        // recurse on the body of the for loop while incrementing the level
+        isl_ast_node *body = isl_ast_node_for_get_body(node);
+        tree_str = generate_isl_ast_representation_string(body, level + 1, tree_str);
+        isl_ast_node_free(body);
+    }
+    else if (isl_ast_node_get_type(node) == isl_ast_node_user)
+    {
+        // Get the computation name from the isl_ast_node
+        isl_ast_expr *expr = isl_ast_node_user_get_expr(node);
+        isl_ast_expr *arg = isl_ast_expr_get_op_arg(expr, 0);
+        isl_id *id = isl_ast_expr_get_id(arg);
+        isl_ast_expr_free(expr);
+        isl_ast_expr_free(arg);
+        std::string computation_name(isl_id_get_name(id));
+
+        // construct string of computation from the isl_ast_node
+        std::string computation_string_repr = std::to_string(level) + "|computation|" + computation_name;
+        isl_id_free(id);
+        
+        tree_str = tree_str + computation_string_repr + "\n";
+    }
+    else if (isl_ast_node_get_type(node) == isl_ast_node_if)
+    {
+        // if we find an if node we construct both its then and else branches
+        tree_str = generate_isl_ast_representation_string(isl_ast_node_if_get_then(node), level, tree_str);
+
+        // if the if node has an else branch we construct it
+        if (isl_ast_node_if_has_else(node))
+        {
+            tree_str = generate_isl_ast_representation_string(isl_ast_node_if_get_else(node), level, tree_str);
+        }
+    }
+
+    return tree_str;
+}
+
+
+// ---- Int-level overloads for TiraLib/autoscheduler (ported from merge_attempt) ----
+bool tiramisu::function::loop_unrolling_is_legal(int i, std::vector<tiramisu::computation *> fused_computations)
+{
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+
+    assert(i >= 0);
+    assert(!this->get_name().empty());
+    assert(this->dep_read_after_write != NULL );
+    assert(this->dep_write_after_write != NULL );
+    assert(this->dep_write_after_read != NULL );
+    assert(fused_computations.size()>0);
+    
+    DEBUG(3, tiramisu::str_dump(" unrolling check for level : "+i));
+ 
+    bool result = true;
+
+    for(auto& computation:fused_computations)
+    {
+        auto loop_var = var(computation->get_loop_level_names()[i]);
+
+        assert(loop_var.get_name().length() > 0);
+
+        std::vector<int> dimensions =
+            computation->get_loop_level_numbers_from_dimension_names({loop_var.get_name()});
+
+        computation->check_dimensions_validity(dimensions);
+
+        if (computation->unrolling_is_legal(loop_var) == false)
+        {
+            result = false;
+            break;
+        }
+    }
+
+    DEBUG(3, tiramisu::str_dump(" unrolling check for level result is : "+std::to_string(result)));
+
+    DEBUG_INDENT(-4);
+
+    return result;
+}
+
+std::tuple<
+      std::vector<std::pair<int,int>>,
+      std::vector<std::pair<int,int>>,
+      std::vector<std::pair<int,int>>> tiramisu::function::skewing_local_solver(std::vector<tiramisu::computation *> fused_computations,
+                                                            int outer_level, int inner_level, int nb_parallel)
+{
+    return skewing_local_solver(fused_computations,
+        var(fused_computations[0]->get_loop_level_names()[outer_level]),
+        var(fused_computations[0]->get_loop_level_names()[inner_level]), nb_parallel);
+}
+
+std::vector<std::tuple<tiramisu::var,int>> function::correcting_loop_fusion_with_shifting(std::vector<tiramisu::computation*> previous_computations,
+                                                                                tiramisu::computation current_computation,
+                                                                                std::vector<int> var_levels_subjected_to_shifting)
+{
+    std::vector<tiramisu::var> vars_subjected_to_shifting;
+    auto loop_level_names = current_computation.get_loop_level_names();
+    for(auto level:var_levels_subjected_to_shifting)
+        vars_subjected_to_shifting.push_back(tiramisu::var(loop_level_names[level]));
+    return correcting_loop_fusion_with_shifting(previous_computations,current_computation,vars_subjected_to_shifting);
+}
+
+void function::print_isl_ast_representation()
+{
+    std::string tree_str = generate_isl_ast_representation_string(nullptr, 0, "");
+    std::cout << tree_str;
+}
+
+void function::set_original_number_of_computations()
+{
+    original_number_of_computations = this->body.size();
+}
+
 void function::dump_sched_graph()
 {
     DEBUG(3, tiramisu::str_dump("Number of schedule graph roots is " +
@@ -1797,7 +2084,7 @@ void tiramisu::function::reset_schedules()
 {
     for (computation *comp : get_computations())
         comp->set_identity_schedule_based_on_iteration_domain();
-        
+
     remove_dimension_tags();
     clear_sched_graph();
 }
@@ -2683,7 +2970,7 @@ bool tiramisu::function::check_legality_for_function()
             isl_set_get_space(right_hs),isl_dim_set);
 
         DEBUG(3, tiramisu::str_dump(" checking legality of dependences "+left_computation_name+" -> "+right_computation_name));
-        
+
         left_comp = this->get_computation_by_name(left_computation_name)[0];
         right_comp = this->get_computation_by_name(right_computation_name)[0];
 
@@ -2783,7 +3070,7 @@ bool tiramisu::function::check_partial_legality_in_function(std::vector<tiramisu
             isl_set_get_space(right_hs),isl_dim_set);
 
         DEBUG(3, tiramisu::str_dump(" checking legality of dependences "+left_computation_name+" -> "+right_computation_name));
-        
+
         left_comp = this->get_computation_by_name(left_computation_name)[0];
         right_comp = this->get_computation_by_name(right_computation_name)[0];
 

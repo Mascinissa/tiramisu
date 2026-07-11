@@ -51,6 +51,7 @@ class dnn_access_matrix;
 class simple_generator;
 class state_computation;
 class ml_model_schedules_generator;
+class simplified_expr_json_exctractor;
 
 void unroll_innermost_levels(std::vector<tiramisu::computation*> const& comps_list, int unroll_fact);
 }
@@ -169,16 +170,22 @@ void prepare_schedules_for_legality_checks(bool reset_static_dimesion = false);
      * so invoking \p prepare_schedules_for_legality_checks() method before is mandatory. 
   */
   bool loop_parallelization_is_legal(tiramisu::var i, std::vector<tiramisu::computation *> fused_computations);
+  // Int-level overloads used by TiraLib/autoscheduler (delegate to the var-based versions).
+  bool loop_parallelization_is_legal(int i, std::vector<tiramisu::computation *> fused_computations);
 
   /**
   * Checks if the given fused computations could legally have their loop level \p i unrolled.
   */
   bool loop_unrolling_is_legal(tiramisu::var i, std::vector<tiramisu::computation *> fused_computations);
+  bool loop_unrolling_is_legal(int i, std::vector<tiramisu::computation *> fused_computations);
 
   /**
   * Checks if the given fused computations could legally have their loop level \p i vectorized.
   */
   bool loop_vectorization_is_legal(tiramisu::var i, std::vector<tiramisu::computation *> fused_computations);
+
+  // Clears the scheduling graph of the implicit function (used by TiraLib).
+  void clear_implicit_function_sched_graph();
 
 //*******************************************************
 
@@ -364,6 +371,12 @@ private:
       * schedule.
       */
     std::vector<computation *> body;
+
+    /**
+      * The number of computations in the original (unscheduled) program.
+      * Recorded by set_original_number_of_computations(); used by the autoscheduler.
+      */
+    int original_number_of_computations;
 
     /**
       * A Halide statement that represents the whole function.
@@ -646,12 +659,6 @@ protected:
     const std::vector<computation *> &get_computations() const;
 
     /**
-      * Return the computation of the function that has
-      * the name \p str.
-      */
-    std::vector<computation *> get_computation_by_name(std::string str) const;
-
-    /**
       * Return a string representing the name of the GPU block iterator at
       * dimension \p lev0.
       * This function only returns a non-empty string if the
@@ -917,10 +924,6 @@ protected:
        */
     void add_mapping(std::pair<std::string, tiramisu::buffer *> p);
     
-    /**
-     * \brief Clear any relation (defined by after, then or between) between computations.
-     */
-    void clear_sched_graph();
 
 public:
 
@@ -1209,11 +1212,36 @@ public:
     void set_arguments(const std::vector<tiramisu::buffer *> &buffer_vec);
 
     /**
+     * Set the number of computations for the original ast.
+     */
+    void set_original_number_of_computations();
+
+    /**
      * Wrapper for all the functions required to run code generation of a
      * tiramisu program.
      */
     void codegen(const std::vector<tiramisu::buffer *> &arguments, const std::string obj_filename, const bool gen_cuda_stmt = false, bool gen_python = false);
     void codegen(const std::vector<tiramisu::buffer *> &arguments, const std::string obj_filename, const tiramisu::hardware_architecture_t gen_architecture_flag, bool gen_python = false);
+
+    /**
+      * Return the computation of the function that has the name \p str.
+      */
+    std::vector<computation *> get_computation_by_name(std::string str) const;
+
+    // Scheduling-graph fusion + isl-AST string helpers used by TiraLib and the
+    // autoscheduler. Ported from the LOOPer/merge_attempt core.
+    void fuse_comps_after_tiling_dfs(computation * comp, std::vector<tiramisu::computation *> comps, int tiling_level,
+                                     std::unordered_set<computation *> &visited);
+    void fuse_comps_after_tiling(std::vector<tiramisu::computation *> comps, int tiling_level);
+    void print_sched_graph();
+    void fuse_comps_sched_graph(tiramisu::computation* comp_into, tiramisu::computation* comp_to_fuse, int fusion_level);
+    std::string generate_isl_ast_representation_string(isl_ast_node *node, int level, std::string tree_str);
+    void print_isl_ast_representation();
+
+    /**
+     * \brief Clear any relation (defined by after, then or between) between computations.
+     */
+    void clear_sched_graph();
 
     /**
      * \brief Set the context of the function.
@@ -1288,6 +1316,7 @@ public:
      * Checks if the given fused computations could legally have their loop level \p i unrolled.
     */
     bool loop_unrolling_is_legal(tiramisu::var i, std::vector<tiramisu::computation *> fused_computations);
+    bool loop_unrolling_is_legal(int i, std::vector<tiramisu::computation *> fused_computations);
 
     /**
      * Checks if the given fused computations could legally have their loop level \p i vectorized.
@@ -1312,6 +1341,7 @@ public:
      * The shifting parameters given are always superior or equal to zero. This is an additional internal condition.
     */
     std::vector<std::tuple<tiramisu::var,int>> correcting_loop_fusion_with_shifting(std::vector<tiramisu::computation*> previous_computations, tiramisu::computation current, std::vector<tiramisu::var> vars_subjected_to_shifting);
+    std::vector<std::tuple<tiramisu::var,int>> correcting_loop_fusion_with_shifting(std::vector<tiramisu::computation*> previous_computations, tiramisu::computation current, std::vector<int> var_levels_subjected_to_shifting);
 
     /**
      * Uses the dependency analysis to check if the specified schedules of computations are legal.
@@ -1353,6 +1383,11 @@ public:
       std::vector<std::pair<int,int>>,
       std::vector<std::pair<int,int>>> skewing_local_solver(std::vector<tiramisu::computation *> fused_computations,
                                                             tiramisu::var outer_variable,tiramisu::var inner_variable, int nb_parallel);
+    std::tuple<
+      std::vector<std::pair<int,int>>,
+      std::vector<std::pair<int,int>>,
+      std::vector<std::pair<int,int>>> skewing_local_solver(std::vector<tiramisu::computation *> fused_computations,
+                                                            int outer_level, int inner_level, int nb_parallel);
 
     /**
      * Computes the best legal skewing parameters for 3 use cases (outer parallelism, innermost parallelism and identity).
@@ -1879,6 +1914,7 @@ class computation
     friend auto_scheduler::evaluate_by_execution;
     friend auto_scheduler::state_computation;
     friend auto_scheduler::ml_model_schedules_generator;
+    friend auto_scheduler::simplified_expr_json_exctractor;
     friend void auto_scheduler::unroll_innermost_levels(std::vector<tiramisu::computation*> const& comps_list, int unroll_fact);
 
 private:
@@ -2729,12 +2765,6 @@ private:
      * {<i0, c0*10+c2>, <i1, c1*10+c3>}.
      */
     void set_iterators_map(std::map<std::string, isl_ast_expr *> map);
-
-    /**
-      * Identical to
-      *      void shift(tiramisu::var L0, int n);
-      */
-    void shift(int L0, int n);
 
     /**
       * Simplify \p set using the context and by calling
@@ -4113,6 +4143,12 @@ public:
     buffer *get_automatically_allocated_buffer();
 
     /**
+      * Apply an affine (unimodular) transformation to the schedule, given as a
+      * matrix. Ported from the LOOPer/merge_attempt core; used by LOOPer and TiraLib.
+      */
+    virtual void matrix_transform(std::vector<std::vector<int>> matrix);
+
+    /**
       * Interchange (swap) the two loop levels \p L0 and \p L1.
       */
     virtual void interchange(var L0, var L1);
@@ -4316,6 +4352,11 @@ public:
       * a negative value would mean a shift backward.
       */
     virtual void shift(var L0, int n);
+
+    /**
+      * Identical to void shift(tiramisu::var L0, int n); addressed by loop-level index.
+      */
+    virtual void shift(int L0, int n);
     
 
     /*
@@ -4650,6 +4691,8 @@ public:
       * are the names of the new dimensions created after tiling.
       */
     // @{
+    virtual void tile(var L0, int sizeX,
+                      var L0_outer, var L0_inner);
     virtual void tile(var L0, var L1, int sizeX, int sizeY);
     virtual void tile(var L0, var L1, int sizeX, int sizeY,
                       var L0_outer, var L1_outer, var L0_inner, var L1_inner);
@@ -4667,6 +4710,7 @@ public:
       * \p L0 > \p L1.
       */
     // @{
+    virtual void tile(int L0, int sizeX);
     virtual void tile(int L0, int L1, int sizeX, int sizeY);
     virtual void tile(int L0, int L1, int L2, int sizeX, int sizeY, int sizeZ);
     // @}
@@ -4802,6 +4846,7 @@ public:
       * assigned.
       */
     // @{
+    virtual void vectorize(int L, int v);
     virtual void vectorize(var L, int v);
     virtual void vectorize(var L, int v, var L_outer, var L_inner);
     // @}
@@ -5328,6 +5373,7 @@ class generator
     friend computation;
     friend buffer;
     friend cuda_ast::generator;
+    friend auto_scheduler::simplified_expr_json_exctractor;
 
 protected:
 

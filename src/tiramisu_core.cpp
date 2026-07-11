@@ -122,6 +122,18 @@ bool loop_parallelization_is_legal(tiramisu::var i, std::vector<tiramisu::comput
     return fct->loop_parallelization_is_legal(i,fused_computations);
 }
 
+bool loop_parallelization_is_legal(int i, std::vector<tiramisu::computation *> fused_computations)
+{
+    function *fct = global::get_implicit_function();
+    return fct->loop_parallelization_is_legal(i, fused_computations);
+}
+
+bool loop_unrolling_is_legal(int i, std::vector<tiramisu::computation *> fused_computations)
+{
+    function *fct = global::get_implicit_function();
+    return fct->loop_unrolling_is_legal(i, fused_computations);
+}
+
 bool loop_unrolling_is_legal(tiramisu::var i, std::vector<tiramisu::computation *> fused_computations)
 {
     function *fct = global::get_implicit_function();
@@ -3061,6 +3073,213 @@ void computation::tile(int L0, int L1, int L2, int sizeX, int sizeY, int sizeZ)
     DEBUG_INDENT(-4);
 }
 
+
+/**
+  * Apply an affine (unimodular) transformation to the schedule, given as a matrix.
+  * Ported from the LOOPer/merge_attempt core; used by LOOPer and TiraLib.
+  */
+void computation::tile(tiramisu::var L0,
+      int sizeX,
+      tiramisu::var L0_outer,
+      tiramisu::var L0_inner)
+{
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+
+    assert(L0.get_name().length() > 0);
+    assert(L0_outer.get_name().length() > 0);
+    assert(L0_inner.get_name().length() > 0);
+
+    std::vector<std::string> original_loop_level_names = this->get_loop_level_names();
+
+    this->assert_names_not_assigned({L0_outer.get_name(),
+                                     L0_inner.get_name()});
+
+    std::vector<int> dimensions =
+        this->get_loop_level_numbers_from_dimension_names({L0.get_name()});
+    assert(dimensions.size() == 1);
+
+    DEBUG(3, tiramisu::str_dump("The loop level that corresponds to " +
+                                L0.get_name() + " is " + std::to_string(dimensions[0])));
+
+    this->tile(dimensions[0], sizeX);
+
+    // Replace the original dimension name with new dimension names
+    this->update_names(original_loop_level_names, {L0_outer.get_name(), L0_inner.get_name()}, dimensions[0], 1);
+
+    DEBUG_INDENT(-4);
+}
+
+void computation::tile(int L0, int sizeX)
+{
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+
+    assert((sizeX > 0) );
+    assert(this->get_iteration_domain() != NULL);
+    this->check_dimensions_validity({L0});
+
+    this->split(L0, sizeX);
+
+    DEBUG_INDENT(-4);
+}
+
+void computation::vectorize(int L0,int v)
+{
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+    
+    bool split_happened = this->separateAndSplit(L0, v);
+
+    if (split_happened)
+    {
+        // Tag the inner loop after splitting to be unrolled. That loop
+        // is supposed to have a constant extent.
+        this->get_update(0).tag_vector_level(L0 + 1, v);
+    }
+    else
+    {
+        this->get_update(0).tag_vector_level(L0, v);
+    }
+
+    this->get_function()->align_schedules();
+    DEBUG_INDENT(-4);
+
+}
+
+// ---- sched-graph clear (ported from merge_attempt, for TiraLib) ----
+void clear_implicit_function_sched_graph(){
+    function *fct = global::get_implicit_function();
+    fct->clear_sched_graph();
+}
+
+void computation::matrix_transform(std::vector<std::vector<int>> matrix)
+{
+
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+    assert(matrix.size()>0);
+    isl_map *schedule = this->get_schedule();
+    DEBUG(3, tiramisu::str_dump("Original schedule: ", isl_map_to_str(schedule)));
+    DEBUG(3, tiramisu::str_dump("Matrix size: " + std::to_string(matrix.size())));
+    
+    int n_dims = isl_map_dim(schedule, isl_dim_out);
+
+    std::vector<isl_id *> dimensions;
+
+    std::vector<std::string> dim_vector;
+    
+    // ------------------------------------------------------------
+    // Create a map for the duplicate schedule.
+    // ------------------------------------------------------------
+    
+    std::string map = "{ " + this->get_name() + "[";
+    
+    for (int i = 0; i < n_dims; i++)
+    {
+        if (i == 0)
+        {
+            int duplicate_ID = isl_map_get_static_dim(schedule, 0);
+            map = map + std::to_string(duplicate_ID);
+        }
+        else
+        {
+            if (isl_map_get_dim_name(schedule, isl_dim_out, i) == NULL)
+            {
+                isl_id *new_id = isl_id_alloc(this->get_ctx(), generate_new_variable_name().c_str(), NULL);
+                schedule = isl_map_set_dim_id(schedule, isl_dim_out, i, new_id);
+            }
+            dim_vector.push_back(isl_map_get_dim_name(schedule, isl_dim_out, i));
+            map = map + isl_map_get_dim_name(schedule, isl_dim_out, i);
+        }
+
+        if (i != n_dims - 1)
+        {
+            map = map + ",";
+        }
+    }
+    
+    map = map + "] ->" + this->get_name() + "[";
+    std::vector<std::string> temp_vector;
+    std::string vector_content;
+    int t = 1;
+    int last_t = -1;
+    for (int i = 0; i < matrix.size(); i++) {
+    
+        for (int j = 0; j < matrix[i].size(); j++){
+            if(j != matrix[i].size()-1){
+                vector_content = vector_content + std::to_string(matrix[i][j]) + dim_vector[t] + "+";
+                t += 2;
+            }
+            else{
+                vector_content = vector_content + std::to_string(matrix[i][j])+dim_vector[t];
+                t += 2;
+            }
+            if(i== matrix.size()-1 && j==matrix[i].size()-1) last_t = t;
+        }
+        t=1;
+        
+        temp_vector.push_back(vector_content);
+        vector_content.clear();     
+    }
+
+    int dim_vector_size = (dim_vector.size()-1) / 2 - temp_vector.size();
+    if(last_t<dim_vector.size()-1){
+        for (int j =0;j<dim_vector_size;j++){
+        temp_vector.push_back(dim_vector[last_t]);
+        last_t+=2;
+    }
+    }
+    
+    
+    t = 0;
+
+    for (int i = 0; i < n_dims; i++)
+    {
+        
+        if (i == 0)
+        {
+            int duplicate_ID = isl_map_get_static_dim(schedule, 0);
+            map = map + std::to_string(duplicate_ID);
+        }
+        else
+        {
+            if (i % 2 == 0){
+                map = map + temp_vector[t];t++;
+            }else{
+                map = map + isl_map_get_dim_name(schedule, isl_dim_out, i);
+                dimensions.push_back(isl_map_get_dim_id(schedule, isl_dim_out, i));
+            }
+        }
+
+        if (i != n_dims - 1)
+        {
+            map = map + ",";
+        }
+    }
+
+    map = map + "]}";
+    
+    
+    DEBUG(3, tiramisu::str_dump("A map that transforms the duplicate"));
+    DEBUG(3, tiramisu::str_dump(map.c_str()));
+
+    isl_map *transformation_map = isl_map_read_from_str(this->get_ctx(), map.c_str());
+
+    transformation_map = isl_map_set_tuple_id(
+        transformation_map, isl_dim_in, isl_map_get_tuple_id(isl_map_copy(schedule), isl_dim_out));
+    isl_id *id_range = isl_id_alloc(this->get_ctx(), this->get_name().c_str(), NULL);
+    transformation_map = isl_map_set_tuple_id(
+        transformation_map, isl_dim_out, id_range);
+
+
+    DEBUG(3, tiramisu::str_dump("Final transformation map : ", isl_map_to_str(transformation_map)));
+    schedule = isl_map_apply_range(isl_map_copy(schedule), isl_map_copy(transformation_map));
+    DEBUG(3, tiramisu::str_dump("Schedule after applying matrix: ", isl_map_to_str(schedule)));
+    this->set_schedule(schedule);
+    
+    DEBUG_INDENT(-4);
+}
 
 void computation::interchange(tiramisu::var L0_var, tiramisu::var L1_var)
 {
