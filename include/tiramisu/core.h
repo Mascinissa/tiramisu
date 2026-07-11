@@ -980,6 +980,14 @@ public:
     void reset_schedules();
 
     /**
+     * \brief Undo the computations added during scheduling (e.g. update
+     * computations created by unrolling), restoring the original computation
+     * list and names. Ported from merge_attempt; required so autoscheduler
+     * candidate evaluation does not accumulate update computations.
+     */
+    void reset_computations();
+
+    /**
      * \brief For each computation, allocate a buffer and map the computation
      * to that buffer.
      *
