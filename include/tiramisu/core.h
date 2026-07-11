@@ -1584,6 +1584,12 @@ protected:
      */
     void set_dim_size(int dim, int size);
 
+    /**
+     * Return a human-readable string of the buffer's dimension sizes.
+     * Ported from merge_attempt; used by the expansion transformation.
+     */
+    std::string buffer_dimensions_as_string() const;
+
 public:
     /**
       * \brief Default tiramisu constructor
@@ -4854,6 +4860,13 @@ public:
       * assigned.
       */
     // @{
+    // Expansion transformation (used by TiraLib). Ported from merge_attempt.
+    virtual void expand(bool update_dependencies = true);
+    virtual void expand(int L, bool update_dependencies = true);
+    virtual void expand(const std::vector<int>& Levels, bool update_dependencies = true);
+    bool expandable();
+    std::vector<bool> compute_expandable_domain_dimensions();
+
     virtual void vectorize(int L, int v);
     virtual void vectorize(var L, int v);
     virtual void vectorize(var L, int v, var L_outer, var L_inner);
