@@ -6555,21 +6555,20 @@ tiramisu::expr utility::extract_bound_expression(isl_ast_node *node, int dim, bo
             isl_ast_node_free(body);
         }
 
-        // Note: result may legitimately be undefined here if an inner loop level
-        // was eliminated by isl because its dimension is single-valued. In that
-        // case the undefined result propagates up to utility::get_bound, which
-        // recovers the bound directly from the iteration set.
+        // result may be undefined if an inner loop level was eliminated by isl
+        // because its dimension is single-valued; the undefined result
+        // propagates up to utility::get_bound, which recovers the bound from the
+        // set directly.
     }
     else if (isl_ast_node_get_type(node) == isl_ast_node_user)
     {
-        // Reaching a user (statement) node while a loop level is still expected
-        // means isl eliminated the loop for that level because the dimension is
-        // single-valued (e.g. a dimension constrained by an equality such as
-        // j = 1 - i). We cannot extract the bound from the AST in this case, so
-        // we leave the result undefined and let the caller (utility::get_bound)
-        // recover the bound directly from the iteration set.
-        DEBUG(3, tiramisu::str_dump("Reached a user node while a loop was expected "
-                                    "(single-valued dimension); bound to be recovered from the set."));
+        // A statement node was reached while a loop level was still expected:
+        // isl eliminated that loop because the dimension is single-valued (which
+        // also happens for skewed domains where a level spans a single integer).
+        // Leave the result undefined; utility::get_bound recovers the bound from
+        // the set via isl_set_dim_max/min.
+        DEBUG(3, tiramisu::str_dump("Reached a user node while a loop was expected; "
+                                    "bound to be recovered from the set."));
     }
     else if (isl_ast_node_get_type(node) == isl_ast_node_if)
     {
@@ -6667,7 +6666,7 @@ int computation::compute_maximal_AST_depth()
  * - During the traversal, assert that the loop is fully nested.
  *
  */
-tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper)
+tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper, bool contains_static_dims)
 {
     DEBUG_FCT_NAME(10);
     DEBUG_INDENT(4);
@@ -6731,19 +6730,69 @@ tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper)
     ast_build = isl_ast_build_set_iterators(ast_build, iterators);
 
     isl_ast_node *node = isl_ast_build_node_from_schedule_map(ast_build, isl_union_map_from_map(map));
-    e = utility::extract_bound_expression(node, dim, upper);
 
-    // If the AST-based extraction could not find a loop for the requested
-    // dimension, it is because isl eliminated that loop: the dimension is
-    // single-valued (constrained by an equality such as j = 1 - i). Recover the
-    // bound directly from the set as an affine expression of the outer
-    // iterators. For a single-valued dimension the lower and upper bounds are
-    // identical.
+
+    // Treating the case where the set we're extracting bounds from
+    // either has one iteration or if conditions
+    int iterator_name_dim = dim;
+    // If the input set has static dimensions we get the dimension index from the input loop level
+    if (contains_static_dims)
+        iterator_name_dim = loop_level_into_dynamic_dimension(dim);
+
+    assert(isl_set_get_dim_name(set, isl_dim_set, iterator_name_dim) != NULL && "Dimension name couldn't be extracted.");
+    // Extract the constraints map for this set
+    // We use the map to determin if an iterator has only a single iteration
+    std::unordered_map<std::string, bool> constraints_map = utility::get_constraints_map(set);
+
+    std::string dim_name = isl_set_get_dim_name(set, isl_dim_set, iterator_name_dim);
+
+    int dimension = -1;
+
+    if(constraints_map.empty()){
+        // If we couldn't extract the constraints, we call the legacy extract bound expression function
+        e = utility::extract_bound_expression(node, dim, upper);
+    }else{
+        // Check if the element exists in the constraints of the set
+        if (constraints_map.find(dim_name) != constraints_map.end() && constraints_map[dim_name] == true)
+        {
+            int offset = 0;
+            // Loop through the dynamic dimensions only and skip iterators that don't have constraints
+            for (int o = 0; o < dim; o++)
+            {
+                dimension = o;
+                // If the input has static dimensions, use the loop_level_into_dynamic_dimension to extract the position of the dynamic dimensions
+                if (contains_static_dims)
+                    dimension = loop_level_into_dynamic_dimension(o);
+
+                if(!isl_set_has_dim_name(set, isl_dim_set, dimension))
+                    continue;
+
+                std::string current_dim_name = isl_set_get_dim_name(set, isl_dim_set, dimension);
+                if (constraints_map.find(current_dim_name) != constraints_map.end() && constraints_map[current_dim_name] == false)
+                {
+                    offset = offset + 1;
+                }
+            }
+            e = utility::extract_bound_expression(node, dim - offset, upper);
+        }
+        else{
+            // Single value set case
+            e = tiramisu::expr(get_single_iterator_bound(set, dim));
+        }
+    }
+
+    // Robustness: the constraints-counting heuristic above can misjudge how many
+    // loop levels isl actually generated (e.g. a skewed domain where a level
+    // spans a single integer is collapsed by isl but still shows two
+    // constraints). When that happens extract_bound_expression cannot find the
+    // requested loop and leaves the result undefined. Recover the bound directly
+    // from the set: isl_set_dim_max/min gives the exact bound of the dimension
+    // as an affine expression of the outer iterators.
     if (!e.is_defined())
     {
-        DEBUG(3, tiramisu::str_dump("Recovering the bound of a single-valued dimension from the set."));
-        isl_pw_aff *bound_pw = upper ? isl_set_dim_max(isl_set_copy(set), dim)
-                                     : isl_set_dim_min(isl_set_copy(set), dim);
+        DEBUG(3, tiramisu::str_dump("Recovering the bound from the set via isl_set_dim_max/min."));
+        isl_pw_aff *bound_pw = upper ? isl_set_dim_max(isl_set_copy(set), iterator_name_dim)
+                                     : isl_set_dim_min(isl_set_copy(set), iterator_name_dim);
         isl_ast_expr *bound_expr = isl_ast_build_expr_from_pw_aff(ast_build, bound_pw);
         e = tiramisu_expr_from_isl_ast_expr(bound_expr);
         isl_ast_expr_free(bound_expr);
@@ -6754,8 +6803,109 @@ tiramisu::expr utility::get_bound(isl_set *set, int dim, int upper)
     assert(e.is_defined() && "The computed bound expression is undefined.");
     DEBUG(10, tiramisu::str_dump(std::string("The ") + (upper ? "upper" : "lower") + " bound is : "); e.dump(false));
     DEBUG_INDENT(-4);
-
     return e;
+}
+
+int utility::get_single_iterator_bound(isl_set *set, int dim)
+{
+    isl_basic_set_list *bset_list = isl_set_get_basic_set_list(set);
+
+    int n_basic_set = isl_set_n_basic_set(set);
+
+    for (int i = 0; i < n_basic_set; i++)
+    {
+        isl_basic_set *bset = isl_basic_set_list_get_basic_set(bset_list, i);
+        isl_constraint_list *cst_list = isl_basic_set_get_constraint_list(bset);
+
+        for (int j = 0; j < isl_constraint_list_n_constraint(cst_list); j++)
+        {
+            isl_constraint *cst = isl_constraint_list_get_constraint(cst_list, j);
+            if (strcmp(isl_val_to_str(isl_constraint_get_coefficient_val(cst, isl_dim_out, dim)), "0") != 0)
+            {
+                return (-1 * std::stoi(isl_val_to_str(isl_constraint_get_constant_val(cst))));
+            }
+        }
+    }
+    return -1;
+}
+
+std::unordered_map<std::string, bool> utility::get_constraints_map(isl_set *set)
+{
+
+    // isl set -> isl map -> isl map get constraints list
+
+    std::unordered_map<std::string, bool> constraints_map{};
+    std::unordered_map<std::string, int> temp_constraints_map{};
+
+    std::string dim_name = "";
+
+    for (int k = 0; k < isl_set_dim(set, isl_dim_out); k++)
+    {
+        if (isl_set_get_dim_name(set, isl_dim_out, k) != NULL)
+        {
+            dim_name = isl_set_get_dim_name(set, isl_dim_out, k);
+            temp_constraints_map.insert({dim_name, 0});
+        }
+        else
+        {
+            continue;
+        }
+    }
+
+    isl_basic_set_list *bset_list = isl_set_get_basic_set_list(set);
+
+    int n_basic_set = isl_set_n_basic_set(set);
+
+    for (int i = 0; i < n_basic_set; i++)
+    {
+        isl_basic_set *bset = isl_basic_set_list_get_basic_set(bset_list, i);
+        isl_constraint_list *cst_list = isl_basic_set_get_constraint_list(bset);
+
+        if (cst_list == NULL){
+            // If we can't extract the constraint list we return the empty map
+            return constraints_map;
+        }
+        // For each constraint in the set
+        for (int j = 0; j < isl_constraint_list_n_constraint(cst_list); j++)
+        {
+            isl_constraint *cst = isl_constraint_list_get_constraint(cst_list, j);
+            // For each dim in the constraint
+            for (int k = 0; k < isl_set_dim(set, isl_dim_out); k++)
+            {
+                // Exatrct the dimension name to get its coefficient
+                std::string dim_name = "";
+                if (isl_set_get_dim_name(set, isl_dim_out, k) != NULL)
+                {
+                    dim_name = isl_set_get_dim_name(set, isl_dim_out, k);
+                }
+                else
+                {
+                    continue;
+                }
+                // Get coefficient of the the dim in this constraint
+                // If coefficient is 0 it means it is not involved in this specific constraint
+                if (strcmp(isl_val_to_str(isl_constraint_get_coefficient_val(cst, isl_dim_out, k)), "0") != 0)
+                {
+                    temp_constraints_map.at(dim_name) = temp_constraints_map[dim_name] + 1;
+                }
+            }
+        }
+    }
+    // Only add the dimensions with both a lower and upper bound
+    // Which translates to at least two occurances in the constraints
+    for (auto constraint_element : temp_constraints_map)
+    {
+        if (constraint_element.second > 1)
+        {
+            constraints_map.insert({constraint_element.first, true});
+        }
+        else
+        {
+            constraints_map.insert({constraint_element.first, false});
+        }
+    }
+
+    return constraints_map;
 }
 
 bool computation::separateAndSplit(tiramisu::var L0, int sizeX)
@@ -6788,15 +6938,17 @@ bool computation::separateAndSplit(int L0, int v)
 
     DEBUG(3, tiramisu::str_dump("Computing upper bound at loop level " + std::to_string(L0)));
 
+    // We set contains_static_dims to true since we are calling get_bound with the
+    // (non-trimmed) time-processor domain, which still contains the static dimensions.
     tiramisu::expr loop_upper_bound =
         tiramisu::expr(o_cast, global::get_loop_iterator_data_type(),
-                       tiramisu::utility::get_bound(this->get_trimmed_time_processor_domain(), L0, true));
+                       tiramisu::utility::get_bound(this->get_time_processor_domain(), L0, true, true));
 
     DEBUG(3, tiramisu::str_dump("Computing lower bound at loop level " + std::to_string(L0)));
 
     tiramisu::expr loop_lower_bound =
         tiramisu::expr(o_cast, global::get_loop_iterator_data_type(),
-                       tiramisu::utility::get_bound(this->get_trimmed_time_processor_domain(), L0, false));
+                       tiramisu::utility::get_bound(this->get_time_processor_domain(), L0, false, true));
 
     std::string lower_without_cast = loop_lower_bound.to_str();
     while (lower_without_cast.find("cast") != std::string::npos) // while there is a "cast" in the expression

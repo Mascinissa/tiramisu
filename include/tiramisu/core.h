@@ -5610,7 +5610,23 @@ public:
      *
      * would return min(N-1,M-1)
      */
-    static tiramisu::expr get_bound(isl_set *set, int dim, int upper);
+    static tiramisu::expr get_bound(isl_set *set, int dim, int upper, bool contains_static_dims = false);
+
+    /**
+     * Return the single value taken by dimension \p dim of \p set when that
+     * dimension is constrained to a single iteration (i.e. fixed by an
+     * equality constraint).
+     */
+    static int get_single_iterator_bound(isl_set *set, int dim);
+
+    /**
+     * Build a map from each named dimension of \p set to a boolean indicating
+     * whether that dimension is bounded by at least a lower and an upper bound
+     * (true) or is single-valued / unconstrained (false). Used by get_bound to
+     * correctly map a loop level to its ISL AST loop when isl collapses
+     * single-iteration dimensions.
+     */
+    static std::unordered_map<std::string, bool> get_constraints_map(isl_set *set);
 
     /**
      * Return the extent of the loop.
