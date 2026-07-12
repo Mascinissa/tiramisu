@@ -2227,7 +2227,16 @@ tiramisu::generator::halide_stmt_from_isl_node(const tiramisu::function &fct, is
 			// a facor, thus we have to use the loop extent as
 			// factor (which should work in most cases but not
 			// always). If the user provided a factor, we use it.
-			if (unrolling_factor != 0)
+			if (unrolling_factor == 1)
+			{
+			    // Unrolling by a factor of 1 is a no-op: separateAndSplit does
+			    // not create a real inner loop for it, so the level here is the
+			    // full loop. Clamping its extent to init+1 (as below) would
+			    // truncate that full loop to a single iteration and silently
+			    // corrupt the results. Leave the loop unchanged and untagged.
+			    DEBUG(3, tiramisu::str_dump("Unrolling factor 1 is a no-op; loop left unchanged."));
+			}
+			else if (unrolling_factor != 0)
 			{
 			    cond_upper_bound_halide_format = simplify(init_expr + Halide::Expr(unrolling_factor)); // fix: extent=upper-init, so upper must be init+factor for non-zero-min (reversed/shifted) loops
 			    fortype = Halide::Internal::ForType::Unrolled;
