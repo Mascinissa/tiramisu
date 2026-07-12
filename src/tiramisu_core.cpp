@@ -103,6 +103,12 @@ bool check_legality_of_function()
     return fct->check_legality_for_function() ;
 }
 
+bool check_legality_of_parallelism()
+{
+    function *fct = global::get_implicit_function();
+    return fct->check_legality_of_parallelism();
+}
+
 
 void perform_full_dependency_analysis()
 {

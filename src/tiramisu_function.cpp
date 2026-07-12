@@ -3358,10 +3358,40 @@ bool tiramisu::function::loop_parallelization_is_legal(int dim_parallel , std::v
     isl_union_map_free(schedules);
 
 
-    DEBUG_INDENT(-4); 
+    DEBUG_INDENT(-4);
     return overall_legality;
 
 
+}
+
+bool tiramisu::function::check_legality_of_parallelism()
+{
+    DEBUG_FCT_NAME(3);
+    DEBUG_INDENT(4);
+
+    // Parallelization is recorded as a tag on a loop level when it is applied,
+    // and its legality is only checked at that moment. Transformations applied
+    // afterwards (e.g. interchange, tiling) can move or reshape loops without
+    // moving the tag, leaving a parallel tag on a level that is no longer
+    // parallelizable. Re-verify every tagged parallel dimension against the
+    // current (final) schedule.
+    bool result = true;
+    for (const auto &pd : this->parallel_dimensions)
+    {
+        std::vector<tiramisu::computation *> comps = this->get_computation_by_name(pd.first);
+        if (comps.empty())
+            continue;
+        if (this->loop_parallelization_is_legal(pd.second, comps) == false)
+        {
+            DEBUG(3, tiramisu::str_dump("Parallelization of level " + std::to_string(pd.second) +
+                                        " for " + pd.first + " is not legal on the final schedule."));
+            result = false;
+            break;
+        }
+    }
+
+    DEBUG_INDENT(-4);
+    return result;
 }
 
 bool tiramisu::function::loop_vectorization_is_legal(tiramisu::var i , std::vector<tiramisu::computation *> fused_computations)

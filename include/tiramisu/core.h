@@ -145,6 +145,15 @@ void init();
  */
 bool check_legality_of_function();
 
+/**
+ * Re-verify that every loop level tagged for parallelization is still legal on
+ * the current (final) schedule. Parallelization legality is only checked when
+ * the tag is applied; later transformations (interchange, tiling, ...) can move
+ * or reshape loops without moving the tag. Must be used after
+ * perform_full_dependency_analysis().
+ */
+bool check_legality_of_parallelism();
+
 
 /**
  * Performe a full dependency analysis RAW/WAR/WAW. The result is stored in the function's attributes
@@ -1290,6 +1299,14 @@ public:
      *  must be invoked after the correct call to \p perform_full_dependency_analysis()
     */
     bool check_legality_for_function();
+
+    /**
+     *  Re-verify that every loop level tagged for parallelization
+     *  (\p parallel_dimensions) is still legal on the current schedule. Useful
+     *  after transformations that move loops without moving the parallel tag.
+     *  Must be invoked after \p perform_full_dependency_analysis().
+    */
+    bool check_legality_of_parallelism();
 
     /**
      * Calculate all the dependencies in the function RAW/WAW/WAR & store in the function's attributes
