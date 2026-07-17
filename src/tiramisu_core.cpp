@@ -7275,22 +7275,30 @@ void computation::split_with_lower_bound(int L0, int sizeX, std::string lower_bo
 
     for (int i = 0; i < n_dims; i++)
     {
-        if (i == 0)
+        // The lower-bound expression was extracted from the current schedule
+        // and refers to its output dimension names. Keep those names on the
+        // input side of the split map so every identifier in the expression is
+        // declared. Only name dimensions that do not have a name yet.
+        const char *schedule_dim_name =
+            isl_map_get_dim_name(schedule, isl_dim_out, i);
+        std::string dim_str;
+        if (schedule_dim_name == NULL)
         {
-            std::string dim_str = generate_new_variable_name();
-            dimensions_str.push_back(dim_str);
-            map = map + dim_str;
+            dim_str = generate_new_variable_name();
+            schedule = isl_map_set_dim_name(
+                schedule, isl_dim_out, i, dim_str.c_str());
         }
         else
         {
-            std::string dim_str = generate_new_variable_name();
-            dimensions_str.push_back(dim_str);
-            map = map + dim_str;
+            dim_str = schedule_dim_name;
+        }
 
-            if (i == inDim0)
-            {
-                inDim0_str = dim_str;
-            }
+        dimensions_str.push_back(dim_str);
+        map = map + dim_str;
+
+        if (i == inDim0)
+        {
+            inDim0_str = dim_str;
         }
 
         if (i != n_dims - 1)
@@ -7355,6 +7363,10 @@ void computation::split_with_lower_bound(int L0, int sizeX, std::string lower_bo
 
 
     isl_map *transformation_map = isl_map_read_from_str(this->get_ctx(), map.c_str());
+    if (transformation_map == NULL)
+    {
+        ERROR("Failed to parse split transformation map: " + map, true);
+    }
 
     for (int i = 0; i < dimensions.size(); i++)
         transformation_map = isl_map_set_dim_id(
