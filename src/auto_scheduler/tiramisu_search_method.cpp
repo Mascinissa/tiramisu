@@ -103,7 +103,14 @@ std::vector<syntax_tree*> beam_search::search_save_matrix(syntax_tree& ast, std:
     // at this stage we only explore matrices
     std::vector<optimization_type> optims;
     optims.push_back(optimization_type::MATRIX);
-    ast.initialize_search_space_optimizations(optims);
+    // Initialize only when entering matrix exploration. Matrix search advances
+    // through AST heads across beam levels, so reinitializing an AST that is
+    // already in this phase would incorrectly restart it at the first head.
+    if (!ast.search_state.initialized ||
+        ast.search_state.optimization_list != optims)
+    {
+        ast.initialize_search_space_optimizations(optims);
+    }
 
     // if this is the root of the exploration tree 
     // we want to create the original schedules which will include identity matrices only
@@ -309,11 +316,12 @@ std::vector<syntax_tree*> beam_search::search_save(syntax_tree& ast, std::vector
         transformations_to_explore = DEFAULT_OPTIMIZATIONS_ORDER;
     }
 
-    if(generator_state::initialized == false)
+    if(!ast.search_state.initialized ||
+       ast.search_state.optimization_list != transformations_to_explore)
     {
         ast.initialize_search_space_optimizations(transformations_to_explore);
         // the optimizations are specified along with the parameters in the generator_state attribute inside the AST.
-        assert(generator_state::initialized == true);
+        assert(ast.search_state.initialized == true);
     }
 
     while ((!ast.is_search_space_empty()))
@@ -446,11 +454,12 @@ void beam_search::search(syntax_tree& ast)
 {
     std::vector<syntax_tree*> children;
     // Look for an optimization that can be applied
-    if(generator_state::initialized == false)
+    if(!ast.search_state.initialized ||
+       ast.search_state.optimization_list != DEFAULT_OPTIMIZATIONS_ORDER)
     {
         ast.initialize_search_space_optimizations(DEFAULT_OPTIMIZATIONS_ORDER);
         // the optimizations are specified along with the parameters in the generator_state attribute inside the AST.
-        assert(generator_state::initialized == true);
+        assert(ast.search_state.initialized == true);
     }
     
     while ((!ast.is_search_space_empty()))

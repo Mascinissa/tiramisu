@@ -3,16 +3,13 @@
 #include <algorithm> //for searching in comps list
 #include <iostream>
 #include <string.h>
+#include <utility>
 #include <tiramisu/auto_scheduler/search_method.h>
 
 
 
 namespace tiramisu::auto_scheduler
 {
-    std::vector<optimization_type> generator_state::optimization_list;
-
-    bool generator_state::initialized;
-    
 computation_info::computation_info(tiramisu::computation *comp, syntax_tree *ast, std::vector<dnn_iterator> iterators)
     : comp_ptr(comp), iters(iterators),
       accesses(comp, iters.size(), comp->get_function()), buffer_nb_dims(iters.size()),
@@ -142,7 +139,7 @@ syntax_tree::syntax_tree(tiramisu::function *fct, std::vector<optimization_info>
     create_initial_isl_state();
 
     // INITIALIZE the generator states as uninitialized
-    generator_state::initialized = false;
+    search_state.initialized = false;
     
     // Get the JSON representation of this AST iterators
     for (ast_node *node : roots)
@@ -2933,11 +2930,18 @@ std::vector<std::pair<ast_node*,int>> syntax_tree::compute_search_space_states(o
 
 void syntax_tree::initialize_search_space_optimizations(std::vector<optimization_type> optimizations)
 {
-    generator_state::initialized = true;
-    generator_state::optimization_list = optimizations;
-    
-    auto first_optim_alternatives = this->compute_search_space_states(generator_state::optimization_list[0]);
-    this->search_state.set_new_heads(first_optim_alternatives);
+    search_state.optimization_list = std::move(optimizations);
+    search_state.initialized = true;
+    search_state.current_index = 0;
+    search_state.optimization_index = 0;
+    search_state.target_ast_heads.clear();
+
+    if (!search_state.optimization_list.empty())
+    {
+        auto first_optim_alternatives =
+            compute_search_space_states(search_state.optimization_list.front());
+        search_state.set_new_heads(first_optim_alternatives);
+    }
 }
 
 bool syntax_tree::is_search_space_empty()
@@ -2947,11 +2951,25 @@ bool syntax_tree::is_search_space_empty()
 
 void syntax_tree::refresh_states()
 {
-    auto optim_alternatives 
-                = this->compute_search_space_states(
-                    generator_state::optimization_list[this->search_state.optimization_index]
-                    );
-    this->search_state.set_new_heads(optim_alternatives);
+    search_state.target_ast_heads.clear();
+
+    // An optimization index equal to the list size represents an exhausted
+    // search state. It is valid to copy such a state, but it has no targets to
+    // rebind to nodes in the copied AST.
+    if (search_state.optimization_index >= search_state.optimization_list.size())
+    {
+        search_state.current_index = 0;
+        return;
+    }
+
+    auto optim_alternatives = compute_search_space_states(
+        search_state.optimization_list.at(search_state.optimization_index));
+    search_state.set_new_heads(optim_alternatives);
+
+    // The AST shape is preserved by copying, so a live target index must still
+    // be valid after target node pointers are recomputed.
+    assert(search_state.target_ast_heads.empty() ||
+           search_state.current_index < search_state.target_ast_heads.size());
 }
 
 
@@ -2969,7 +2987,7 @@ std::pair<ast_node*,int> syntax_tree::get_previous_optimization_target()
 
 optimization_type syntax_tree::get_current_optimization_type() const
 {
-    return generator_state::optimization_list[this->search_state.optimization_index]; 
+    return search_state.optimization_list.at(search_state.optimization_index);
 }
 void syntax_tree::move_to_next_optimization_target()
 {
@@ -2981,11 +2999,11 @@ void syntax_tree::move_to_next_optimization_target()
     {
         this->search_state.optimization_index++;
 
-        if(this->search_state.optimization_index < generator_state::optimization_list.size())
+        if(this->search_state.optimization_index < this->search_state.optimization_list.size())
         {
             auto optim_alternatives 
                 = this->compute_search_space_states(
-                    generator_state::optimization_list[this->search_state.optimization_index]
+                    this->search_state.optimization_list.at(this->search_state.optimization_index)
                     );
             this->search_state.set_new_heads(optim_alternatives);
             this->search_state.current_index = 0;
@@ -3002,15 +3020,15 @@ void syntax_tree::move_to_next_head()
     {
         //this->search_state.optimization_index++;
 
-        if(this->search_state.optimization_index < generator_state::optimization_list.size())
+        if(this->search_state.optimization_index < this->search_state.optimization_list.size())
         {
             auto optim_alternatives 
                 = this->compute_search_space_states(
-                    generator_state::optimization_list[this->search_state.optimization_index]
+                    this->search_state.optimization_list.at(this->search_state.optimization_index)
                     );
             this->search_state.set_new_heads(optim_alternatives);
             this->search_state.current_index = 0;
-        }else if(generator_state::optimization_list.size()==1 && generator_state::optimization_list.at(0) == optimization_type::MATRIX){
+        }else if(this->search_state.optimization_list.size()==1 && this->search_state.optimization_list.at(0) == optimization_type::MATRIX){
             
             auto optim_alternatives   = this->compute_search_space_states( optimization_type::MATRIX);
             
@@ -3056,27 +3074,14 @@ const std::string syntax_tree::get_fct_name() const
 
 bool generator_state::is_current_optimization_fully_explored()
 {
-    if(this->current_index < this->target_ast_heads.size()-1)
-    {
-        return false;
-    }
-    else
-    {
-        return true;
-    }
+    return this->target_ast_heads.empty() ||
+           this->current_index >= this->target_ast_heads.size() - 1;
 }
 
 
 bool generator_state::can_move_to_next_optimization()
 {
-    if(this->optimization_index < (generator_state::optimization_list.size() - 1))
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    }
+    return this->optimization_index + 1 < this->optimization_list.size();
 }
 
 
@@ -3088,7 +3093,7 @@ void generator_state::set_new_heads(std::vector<std::pair<ast_node*,int>>& optim
 
 std::pair<ast_node*,int> generator_state::get_current_head()
 {
-    return this->target_ast_heads[this->current_index];
+    return this->target_ast_heads.at(this->current_index);
 }
 
 
@@ -3101,24 +3106,9 @@ void generator_state::increment_index()
 
 bool generator_state::is_search_space_empty()
 {
-    if(this->current_index < this->target_ast_heads.size())
-    {
-        
-        return false;
-    }
-    else
-    {// we are in the last optimization
-        if(this->optimization_index < generator_state::optimization_list.size())
-        {
-            
-            return false;
-        }
-        else
-        {
-            
-            return true;
-        }
-    }
+    return !this->initialized ||
+           this->optimization_index >= this->optimization_list.size() ||
+           this->current_index >= this->target_ast_heads.size();
 }
 
 

@@ -27,9 +27,12 @@ class generator_state
 
 public:
 
-    static std::vector<optimization_type> optimization_list;
+    // Keep the optimization order together with the indices that refer to it.
+    // Each AST owns its generator state, so search phases cannot overwrite the
+    // optimization list used by another AST.
+    std::vector<optimization_type> optimization_list;
 
-    static bool initialized;
+    bool initialized = false;
 
     // a list of ast_node to explore with an additional information (int).
     std::vector<std::pair<ast_node*,int>> target_ast_heads;
