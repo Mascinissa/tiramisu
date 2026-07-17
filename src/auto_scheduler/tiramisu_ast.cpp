@@ -2709,12 +2709,10 @@ std::string syntax_tree::get_tiralib_schedule_str()
                 else if (optim.unimodular_transformation_type == 2) //Reversal
                     schedule_str += "R(L"+std::to_string(optim.l0)+","+comps_list_str+")|";
                 else if(optim.unimodular_transformation_type == 3) //skewing
-                    if (optim.l1_fact!=0)
-                        schedule_str += "S(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+
-                                std::to_string(optim.l0_fact)+","+std::to_string(optim.l1_fact)+","+comps_list_str+")|";
-                    else // sometinmes 2nd skew factor ==0 and violates an assert in tiramiu (IDK why this 2nd fact is set like that). I noticed that in those cases the actual skew factors are l2_fact and l3_fact elements
-                        schedule_str += "S(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+
-                                std::to_string(optim.l2_fact)+","+std::to_string(optim.l3_fact)+","+comps_list_str+")|";
+                    schedule_str += "S(L"+std::to_string(optim.l0)+",L"+std::to_string(optim.l1)+","+
+                            std::to_string(optim.l0_fact)+","+std::to_string(optim.l1_fact)+","+
+                            std::to_string(optim.l2_fact)+","+std::to_string(optim.l3_fact)+","+
+                            comps_list_str+")|";
                 else if(optim.unimodular_transformation_type == 0)
                     {/* nothing to do*/}
                 else{
